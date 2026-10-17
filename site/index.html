@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fogo no Amazonas</title>
+  <meta name="description" content="Cruzamento de focos de calor (INPE) e eventos de fogo (SIPAM) com imóveis do CAR, unidades de conservação e terras indígenas no Amazonas.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topo">
+    <h1>Fogo no Amazonas <span>quem, onde, quando</span></h1>
+    <div class="atualizado" id="atualizado">carregando dados…</div>
+  </header>
+
+  <main class="layout">
+    <aside class="painel">
+      <section class="filtros">
+        <h2>Filtros</h2>
+        <label>De <input type="date" id="f-de"></label>
+        <label>Até <input type="date" id="f-ate"></label>
+        <div class="atalhos">
+          <button data-dias="7">7 dias</button>
+          <button data-dias="30">30 dias</button>
+          <button data-dias="90">90 dias</button>
+          <button data-dias="0">Ano</button>
+        </div>
+        <label>Satélite <select id="f-sat"><option value="-1">Todos</option></select></label>
+        <label>Município <select id="f-mun"><option value="-1">Todos</option></select></label>
+        <fieldset id="f-cat"><legend>Situação fundiária do foco</legend></fieldset>
+      </section>
+
+      <section class="kpis" id="kpis"></section>
+
+      <section class="bloco">
+        <h2>Focos por dia</h2>
+        <div class="grafico alto"><canvas id="g-dia"></canvas></div>
+      </section>
+
+      <section class="bloco">
+        <h2>Onde caem os focos</h2>
+        <div class="grafico"><canvas id="g-cat"></canvas></div>
+      </section>
+
+      <section class="bloco">
+        <h2>Municípios com mais focos</h2>
+        <div class="grafico alto"><canvas id="g-mun"></canvas></div>
+      </section>
+
+      <section class="bloco">
+        <h2>Imóveis CAR com mais focos</h2>
+        <p class="nota">O CAR público não traz nome nem CPF/CNPJ do declarante (LGPD). Use o código na
+          <a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">consulta pública do CAR</a>.</p>
+        <table class="ranking" id="t-car"></table>
+      </section>
+
+      <section class="bloco">
+        <h2>Unidades de conservação</h2>
+        <table class="ranking" id="t-uc"></table>
+      </section>
+
+      <section class="bloco">
+        <h2>Terras indígenas</h2>
+        <table class="ranking" id="t-ti"></table>
+      </section>
+
+      <section class="bloco">
+        <h2>Eventos de fogo SIPAM com mais área em imóveis CAR</h2>
+        <p class="nota">Eventos ativos ou em observação agora. Não seguem os filtros de data.</p>
+        <table class="ranking" id="t-ev"></table>
+      </section>
+
+      <footer class="fontes" id="fontes"></footer>
+    </aside>
+
+    <section class="mapa-wrap">
+      <div id="mapa"></div>
+      <div class="camadas" id="camadas">
+        <strong>Camadas</strong>
+        <label><input type="checkbox" data-camada="focos" checked> Focos INPE</label>
+        <label><input type="checkbox" data-camada="eventos" checked> Eventos SIPAM</label>
+        <label><input type="checkbox" data-camada="car" checked> Imóveis CAR com fogo</label>
+        <label><input type="checkbox" data-camada="uc" checked> Unidades de conservação</label>
+        <label><input type="checkbox" data-camada="ti" checked> Terras indígenas</label>
+        <label><input type="checkbox" data-camada="mun"> Focos por município</label>
+        <div class="base">
+          <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
+          <label><input type="radio" name="base" value="satelite"> Satélite</label>
+        </div>
+      </div>
+      <div class="legenda" id="legenda"></div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
