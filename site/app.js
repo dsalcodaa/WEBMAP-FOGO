@@ -311,9 +311,9 @@ function iniciarMapa() {
     map.addLayer({
       id: 'focos-heat', type: 'heatmap', source: 'focos', maxzoom: 9,
       paint: {
-        'heatmap-weight': 0.15,
-        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 3, 9, 10],
-        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 9, 1],
+        'heatmap-weight': 0.25,
+        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 3, 3, 5, 4, 9, 10],
+        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 3, 1, 5, 0.5, 9, 1],
         'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.9, 9, 0],
         'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
           0, 'rgba(0,0,0,0)', 0.2, '#5a1a0a', 0.45, '#b3261e', 0.7, '#ff6b2c', 1, '#ffe08a'],
