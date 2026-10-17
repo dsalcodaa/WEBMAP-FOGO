@@ -21,7 +21,7 @@ const fmtHa = n => `${fmt(Math.round(n))} ha`;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const estado = { de: 0, ate: 365, sat: -1, mun: -1, cats: new Set([0, 1, 2, 3]) };
-let F, geo = {}, map, graficos = {};
+let F, geo = {}, map, graficos = {}, mapaPronto = false;
 
 async function carregar() {
   const nomes = ['focos.json', 'meta.json', 'car.geojson', 'uc.geojson', 'ti.geojson', 'eventos.geojson', 'municipios.geojson'];
@@ -75,14 +75,6 @@ function passa(i) {
     && (estado.sat < 0 || F.sat[i] === estado.sat)
     && (estado.mun < 0 || F.mun[i] === estado.mun)
     && estado.cats.has(F.cat[i]);
-}
-
-function filtroMapa() {
-  const f = ['all', ['>=', ['get', 'd'], estado.de], ['<=', ['get', 'd'], estado.ate],
-    ['in', ['get', 'c'], ['literal', [...estado.cats]]]];
-  if (estado.sat >= 0) f.push(['==', ['get', 's'], estado.sat]);
-  if (estado.mun >= 0) f.push(['==', ['get', 'm'], estado.mun]);
-  return f;
 }
 
 // ---------------------------------------------------------------- agregação
@@ -246,16 +238,22 @@ function selecionarMunicipio(i) {
   zoomMunicipio(i);
 }
 
+// só os focos do filtro vão para o mapa: o worker do MapLibre leva ~30 s para indexar o ano inteiro
 function focosGeoJSON() {
-  const features = new Array(F.n);
+  const features = [];
   for (let i = 0; i < F.n; i++) {
-    features[i] = {
+    if (!passa(i)) continue;
+    features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [F.lon[i], F.lat[i]] },
-      properties: { k: i, d: F.dia[i], s: F.sat[i], m: F.mun[i], c: F.cat[i], f: F.frp[i] },
-    };
+      properties: { k: i, c: F.cat[i] },
+    });
   }
   return { type: 'FeatureCollection', features };
+}
+
+function carregandoFocos(sim) {
+  $('#carregando').hidden = !sim;
 }
 
 function estiloBase(nome) {
@@ -283,7 +281,8 @@ function iniciarMapa() {
     map.addSource('ti', { type: 'geojson', data: geo.ti, promoteId: 'i' });
     map.addSource('car', { type: 'geojson', data: geo.car, promoteId: 'i' });
     map.addSource('eventos', { type: 'geojson', data: geo.eventos, promoteId: 'id_evento' });
-    map.addSource('focos', { type: 'geojson', data: focosGeoJSON() });
+    map.addSource('focos', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.on('sourcedata', e => { if (e.sourceId === 'focos' && map.isSourceLoaded('focos')) carregandoFocos(false); });
 
     const n = ['coalesce', ['feature-state', 'n'], 0];
     map.addLayer({
@@ -330,6 +329,7 @@ function iniciarMapa() {
     });
 
     popups();
+    mapaPronto = true;
     atualizar();
     zoomMunicipio(-1);
   });
@@ -418,9 +418,8 @@ function estadoMapa(a) {
   aplicar('uc', a.porUc);
   aplicar('ti', a.porTi);
   aplicar('mun', a.porMun);
-  const filtro = filtroMapa();
-  map.setFilter('focos-heat', filtro);
-  map.setFilter('focos-pt', filtro);
+  carregandoFocos(true);
+  map.getSource('focos').setData(focosGeoJSON());
 }
 
 // ---------------------------------------------------------------- ciclo
@@ -430,7 +429,7 @@ function atualizar() {
   kpis(a);
   graficosAtualizar(a);
   tabelas(a);
-  if (map?.isStyleLoaded() && map.getSource('focos')) estadoMapa(a);
+  if (mapaPronto) estadoMapa(a);
 }
 
 carregar().then(() => {

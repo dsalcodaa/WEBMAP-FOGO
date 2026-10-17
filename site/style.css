@@ -104,6 +104,18 @@ fieldset label { flex-direction: row !important; align-items: center; gap: 6px !
 .camadas { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 3px; }
 .camadas .base { display: flex; gap: 10px; border-top: 1px solid var(--borda); margin-top: 4px; padding-top: 4px; }
 .legenda { bottom: 30px; left: 10px; display: flex; flex-direction: column; gap: 3px; }
+.carregando {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(26, 31, 38, .92);
+  border: 1px solid var(--destaque);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.carregando[hidden] { display: none; }
 
 .maplibregl-popup-content { background: var(--painel); color: var(--texto); border: 1px solid var(--borda); font-size: 12px; max-width: 320px; }
 .maplibregl-popup-tip { border-top-color: var(--painel) !important; border-bottom-color: var(--painel) !important; }
