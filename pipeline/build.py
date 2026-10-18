@@ -1,4 +1,5 @@
-"""Baixa as fontes, cruza focos/eventos de fogo com CAR, UCs, TIs e municípios e gera os dados do site.
+"""Baixa as fontes, cruza focos/eventos de fogo com CAR, UCs, TIs e municípios, calcula prioridade de
+mobilização e distâncias de acesso, e gera os dados do site.
 
 Uso: python pipeline/build.py [--ano 2026] [--saida site/data]
 """
@@ -13,24 +14,51 @@ import pandas as pd
 
 import fontes
 
-CRS_AREA = "EPSG:5880"  # SIRGAS 2000 / Brazil Polyconic, para áreas em hectares
+CRS_METRICO = "EPSG:5880"  # SIRGAS 2000 / Brazil Polyconic: áreas em ha e distâncias em km
 CATEGORIAS = ["Terra Indígena", "Unidade de Conservação", "Imóvel CAR", "Sem cadastro"]
+SAT_REFERENCIA = "AQUA_M-T"  # satélite de referência do INPE para séries comparáveis
+CELULA_GRAUS = 0.01          # ~1,1 km: um foco único por célula por dia
+BUFFER_EVENTO_M = 1000       # focos recentes contados até 1 km da borda do evento
+
+# pesos do índice de prioridade de mobilização (somam 100)
+PESOS = {"indice_sipam": 30, "focos_48h": 25, "area": 15, "persistencia": 10, "area_sensivel": 10, "ativo": 10}
+CLASSES = [(70, "Crítica"), (50, "Alta"), (30, "Moderada"), (0, "Baixa")]
 
 
 def escrever_geojson(gdf: gpd.GeoDataFrame, caminho: Path, tolerancia=0.0002):
     gdf = gdf.copy()
-    gdf["geometry"] = gdf.geometry.simplify(tolerancia, preserve_topology=True)
+    if tolerancia:
+        gdf["geometry"] = gdf.geometry.simplify(tolerancia, preserve_topology=True)
     gdf = gdf[~gdf.geometry.is_empty]
     gdf.to_file(caminho, driver="GeoJSON", COORDINATE_PRECISION=5, RFC7946="YES")
     print(f"  {caminho.name}: {len(gdf)} feições, {caminho.stat().st_size / 1e6:.1f} MB")
 
 
 def poligono_mais_especifico(pontos: gpd.GeoDataFrame, poligonos: gpd.GeoDataFrame, coluna: str) -> pd.Series:
-    """Para cada ponto, índice (em `poligonos`) do menor polígono que o contém; -1 se nenhum.
+    """Para cada ponto, valor de `coluna` do menor polígono que o contém; -1 se nenhum.
     Polígonos do CAR se sobrepõem, então o menor é o mais provável de ser o imóvel de origem."""
     j = gpd.sjoin(pontos[["geometry"]], poligonos[[coluna, "_area", "geometry"]], predicate="within", how="inner")
     j = j.sort_values("_area").loc[lambda d: ~d.index.duplicated(keep="first")]
     return j[coluna].reindex(pontos.index).fillna(-1).astype(int)
+
+
+def focos_unicos(focos: gpd.GeoDataFrame, dia0: pd.Timestamp) -> gpd.GeoDataFrame:
+    """Agrupa detecções em focos únicos: uma célula de ~1 km por dia, somando todos os satélites.
+    Um mesmo fogo é detectado várias vezes ao dia (GOES-19 a cada 10 min, VIIRS em 3 satélites)."""
+    f = focos.sort_values("data_hora_gmt").copy()
+    f["dia"] = (f.data_hora_gmt.dt.normalize() - dia0).dt.days
+    f["cy"] = np.floor(f.lat / CELULA_GRAUS).astype(int)
+    f["cx"] = np.floor(f.lon / CELULA_GRAUS).astype(int)
+    f["ref"] = (f.satelite == SAT_REFERENCIA).astype(int)
+    u = f.groupby(["cy", "cx", "dia"], sort=False).agg(
+        lat=("lat", "first"), lon=("lon", "first"), n=("id", "size"), nref=("ref", "sum"),
+        frp=("frp", "max"), municipio_id=("municipio_id", "first")).reset_index()
+    return gpd.GeoDataFrame(u, geometry=gpd.points_from_xy(u.lon, u.lat), crs=fontes.CRS)
+
+
+def percentil(s: pd.Series) -> pd.Series:
+    r = s.rank(pct=True)
+    return r.where(s > 0, 0).fillna(0)
 
 
 def main():
@@ -41,53 +69,99 @@ def main():
     args = ap.parse_args()
     saida, cache = Path(args.saida), Path(args.cache)
     saida.mkdir(parents=True, exist_ok=True)
+    dia0 = pd.Timestamp(f"{args.ano}-01-01")
 
-    print("1/7 limites IBGE")
+    print("1/9 limites e sedes municipais (IBGE)")
     uf = fontes.limite_uf()
     mun = fontes.municipios().sort_values("nome").reset_index(drop=True)
-
-    print("2/7 unidades de conservação (CNUC/MMA)")
+    mun["i"] = np.arange(len(mun))
+    sedes = fontes.sedes_municipais()
+    print("2/9 unidades de conservação (CNUC/MMA)")
     uc = fontes.unidades_conservacao(uf).reset_index(drop=True)
-    print("3/7 terras indígenas (FUNAI)")
+    print("3/9 terras indígenas (FUNAI)")
     ti = fontes.terras_indigenas(uf).reset_index(drop=True)
-    print("4/7 imóveis CAR (SICAR)")
-    car = fontes.imoveis_car(cache / f"car_{fontes.UF.lower()}.parquet").reset_index(drop=True)
-    print("5/7 eventos de fogo (SIPAM)")
+    print("4/9 imóveis CAR (SICAR)")
+    car = fontes.imoveis_car(cache / f"car_{fontes.UF.lower()}.parquet")
+    n_car_cancelados = int((car.status_imovel == "CA").sum())
+    car = car[car.status_imovel != "CA"].reset_index(drop=True)
+    print("5/9 rodovias (OpenStreetMap)")
+    vias = fontes.vias_osm(cache / f"vias_{fontes.UF.lower()}.parquet")
+    print("6/9 eventos de fogo e prioridades (SIPAM)")
     eventos = fontes.eventos_sipam().reset_index(drop=True)
-    print("6/7 focos de calor (INPE)")
-    focos = fontes.focos_inpe(args.ano).reset_index(drop=True)
+    eventos["indice_sipam"] = eventos.id_evento.map(fontes.prioridades_sipam(eventos.id_evento.tolist()))
+    print("7/9 focos de calor (INPE)")
+    deteccoes = fontes.focos_inpe(args.ano)
+    n_deteccoes_brutas = len(deteccoes)
+    deteccoes = deteccoes.drop_duplicates(["satelite", "data_hora_gmt", "lat", "lon"])
+    focos = focos_unicos(deteccoes, dia0)
+    ultimo_dia = int(focos.dia.max())
 
-    print("7/7 cruzamentos")
+    print("8/9 cruzamentos")
     for g in (uc, ti, car):
-        g["_area"] = g.to_crs(CRS_AREA).area
+        g["_area"] = g.to_crs(CRS_METRICO).area
         g["_i"] = np.arange(len(g))
 
     focos["car_i"] = poligono_mais_especifico(focos, car, "_i")
     focos["uc_i"] = poligono_mais_especifico(focos, uc, "_i")
     focos["ti_i"] = poligono_mais_especifico(focos, ti, "_i")
-    focos["cat"] = np.select(
-        [focos.ti_i >= 0, focos.uc_i >= 0, focos.car_i >= 0], [0, 1, 2], default=3)
+    focos["cat"] = np.select([focos.ti_i >= 0, focos.uc_i >= 0, focos.car_i >= 0], [0, 1, 2], default=3)
 
-    # eventos SIPAM x CAR: área do evento dentro de cada imóvel
-    ev_area = eventos.to_crs(CRS_AREA)
-    car_area = car[["_i", "geometry"]].to_crs(CRS_AREA)
-    pares = gpd.sjoin(ev_area[["id_evento", "geometry"]], car_area, predicate="intersects", how="inner")
-    if len(pares):
-        geo_ev = ev_area.set_index("id_evento").geometry
-        geo_car = car_area.set_index("_i").geometry
-        pares["ha"] = [
-            geo_ev[e].intersection(geo_car[c]).area / 1e4
-            for e, c in zip(pares.id_evento, pares._i)
-        ]
-        pares = pares[pares.ha > 0]
+    # eventos SIPAM x CAR
+    ev_m = eventos.to_crs(CRS_METRICO)
+    car_m = car[["_i", "geometry"]].to_crs(CRS_METRICO)
+    pares = gpd.sjoin(ev_m[["id_evento", "geometry"]], car_m, predicate="intersects", how="inner")
+    geo_ev = ev_m.set_index("id_evento").geometry
+    geo_car = car_m.set_index("_i").geometry
+    pares["ha"] = [geo_ev[e].intersection(geo_car[c]).area / 1e4 for e, c in zip(pares.id_evento, pares._i)]
+    pares = pares[pares.ha > 0]
+    # área do evento dentro de imóveis: união dos imóveis, para não contar sobreposições do CAR duas vezes
+    area_car = {e: geo_ev[e].intersection(geo_car.loc[g._i].union_all()).area / 1e4
+                for e, g in pares.groupby("id_evento")}
     queimada_por_car = pares.groupby("_i").agg(area_evento_ha=("ha", "sum"), n_eventos=("id_evento", "nunique"))
-    car_por_evento = pares.groupby("id_evento").agg(n_car=("_i", "nunique"), area_car_ha=("ha", "sum"))
+    eventos["n_car"] = eventos.id_evento.map(pares.groupby("id_evento")._i.nunique()).fillna(0).astype(int)
+    eventos["area_car_ha"] = eventos.id_evento.map(area_car).fillna(0).round(1)
+    eventos["area_ha"] = (ev_m.area / 1e4).round(1)
 
-    # ---------------------------------------------------------------- saídas
-    # imóveis CAR com algum foco ou evento
+    # focos únicos recentes no evento (até 1 km da borda)
+    recentes = focos[focos.dia >= ultimo_dia - 1].to_crs(CRS_METRICO)
+    zona = ev_m[["id_evento", "geometry"]].copy()
+    zona["geometry"] = zona.buffer(BUFFER_EVENTO_M)
+    n48 = gpd.sjoin(recentes[["geometry"]], zona, predicate="within").groupby("id_evento").size()
+    eventos["focos_48h"] = eventos.id_evento.map(n48).fillna(0).astype(int)
+
+    # município do evento e área sensível
+    ponto = ev_m.geometry.representative_point()
+    pts = gpd.GeoDataFrame({"id_evento": eventos.id_evento}, geometry=ponto, crs=CRS_METRICO)
+    em_mun = gpd.sjoin(pts, mun[["i", "geometry"]].to_crs(CRS_METRICO), predicate="within")
+    eventos["mun"] = eventos.id_evento.map(em_mun.drop_duplicates("id_evento").set_index("id_evento")["i"]).fillna(-1).astype(int)
+    eventos["area_sensivel"] = eventos[["terra_indigena", "unidade_conservacao", "quilombola", "projeto_assentamento"]] \
+        .notna().any(axis=1)
+
+    # logística: sede municipal mais próxima, Manaus e rodovia mais próxima (linha reta, em km)
+    sedes_m = sedes.to_crs(CRS_METRICO)
+    prox = gpd.sjoin_nearest(pts, sedes_m[["nome", "geometry"]], distance_col="d").drop_duplicates("id_evento")
+    eventos["sede"] = eventos.id_evento.map(prox.set_index("id_evento")["nome"])
+    eventos["d_sede_km"] = eventos.id_evento.map(prox.set_index("id_evento")["d"] / 1000).round(1)
+    manaus = sedes_m[sedes_m.capital].geometry.iloc[0]
+    eventos["d_manaus_km"] = (pts.distance(manaus) / 1000).round(1)
+    via = gpd.sjoin_nearest(pts, vias[["geometry"]].to_crs(CRS_METRICO), distance_col="d").drop_duplicates("id_evento")
+    eventos["d_via_km"] = eventos.id_evento.map(via.set_index("id_evento")["d"] / 1000).round(1)
+
+    # índice de prioridade de mobilização (0-100)
+    comp = {
+        "indice_sipam": percentil(eventos.indice_sipam.fillna(0)),
+        "focos_48h": percentil(eventos.focos_48h),
+        "area": percentil(eventos.area_ha),
+        "persistencia": percentil(eventos.persistencia_dias.fillna(0)),
+        "area_sensivel": eventos.area_sensivel.astype(float),
+        "ativo": (eventos.status_evento == "Ativo").astype(float),
+    }
+    eventos["prioridade"] = sum(PESOS[k] * v for k, v in comp.items()).round(1)
+    eventos["classe"] = eventos.prioridade.map(lambda p: next(c for lim, c in CLASSES if p >= lim))
+
+    print("9/9 saídas")
     com_fogo = set(focos.loc[focos.car_i >= 0, "car_i"]) | set(queimada_por_car.index)
-    car_out = car[car._i.isin(com_fogo)].copy()
-    car_out = car_out.join(queimada_por_car, on="_i")
+    car_out = car[car._i.isin(com_fogo)].copy().join(queimada_por_car, on="_i")
     car_out["area_evento_ha"] = car_out.area_evento_ha.fillna(0).round(1)
     car_out["n_eventos"] = car_out.n_eventos.fillna(0).astype(int)
     car_out["area_ha"] = (car_out._area / 1e4).round(1)
@@ -109,29 +183,25 @@ def main():
             ["i", "nome", "etnia", "fase", "modalidade_ti", "area_ha", "geometry"]],
         saida / "ti.geojson", tolerancia=0.001)
 
-    mun["i"] = np.arange(len(mun))
     escrever_geojson(mun[["i", "cod_ibge", "nome", "geometry"]], saida / "municipios.geojson", tolerancia=0.002)
+    escrever_geojson(sedes, saida / "sedes.geojson", tolerancia=0)
 
-    eventos = eventos.join(car_por_evento, on="id_evento")
-    eventos["n_car"] = eventos.n_car.fillna(0).astype(int)
-    eventos["area_car_ha"] = eventos.area_car_ha.fillna(0).round(1)
-    eventos["area_ha"] = (ev_area.area / 1e4).round(1)
     eventos = eventos.drop(columns=["latitude", "longitude", "pais"])
+    eventos["indice_sipam"] = eventos.indice_sipam.round(1)
     escrever_geojson(eventos, saida / "eventos.geojson", tolerancia=0.0001)
 
-    # focos em formato colunar (compacto); índices apontam para as listas e GeoJSONs acima
-    satelites = sorted(focos.satelite.unique())
+    # focos únicos em formato colunar; índices apontam para as listas e GeoJSONs acima
     mun_idx = {c: i for i, c in enumerate(mun.cod_ibge)}
-    dia0 = pd.Timestamp(f"{args.ano}-01-01")
     colunas = {
         "ano": args.ano,
+        "ultimo_dia": ultimo_dia,
         "categorias": CATEGORIAS,
-        "satelites": satelites,
         "municipios": mun.nome.tolist(),
         "lat": focos.lat.round(4).tolist(),
         "lon": focos.lon.round(4).tolist(),
-        "dia": (focos.data_hora_gmt - dia0).dt.days.tolist(),
-        "sat": focos.satelite.map({s: i for i, s in enumerate(satelites)}).tolist(),
+        "dia": focos.dia.tolist(),
+        "n": focos.n.tolist(),
+        "nref": focos.nref.tolist(),
         "mun": focos.municipio_id.str.strip().map(mun_idx).fillna(-1).astype(int).tolist(),
         "cat": focos.cat.tolist(),
         "car": focos.car_i.tolist(),
@@ -140,19 +210,32 @@ def main():
         "frp": focos.frp.fillna(0).round(1).tolist(),
     }
     (saida / "focos.json").write_text(json.dumps(colunas, separators=(",", ":")))
-    print(f"  focos.json: {len(focos)} focos, {(saida / 'focos.json').stat().st_size / 1e6:.1f} MB")
+    print(f"  focos.json: {len(focos)} focos únicos, {(saida / 'focos.json').stat().st_size / 1e6:.1f} MB")
 
     meta = {
         "atualizado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
         "uf": fontes.UF,
         "ano": args.ano,
         "totais": {
-            "focos": len(focos),
+            "deteccoes_brutas": n_deteccoes_brutas,
+            "deteccoes_sem_duplicatas": len(deteccoes),
+            "focos_unicos": len(focos),
+            "deteccoes_satelite_referencia": int(focos.nref.sum()),
             "eventos_sipam": len(eventos),
+            "eventos_com_indice_sipam": int(eventos.indice_sipam.notna().sum()),
             "imoveis_car_uf": len(car),
+            "imoveis_car_cancelados_excluidos": n_car_cancelados,
             "imoveis_car_com_fogo": len(car_out),
             "ucs": len(uc),
             "tis": len(ti),
+            "vias_osm": len(vias),
+        },
+        "parametros": {
+            "satelite_referencia": SAT_REFERENCIA,
+            "celula_graus": CELULA_GRAUS,
+            "buffer_evento_m": BUFFER_EVENTO_M,
+            "pesos_prioridade": PESOS,
+            "classes_prioridade": {c: lim for lim, c in CLASSES},
         },
         "fontes": {
             "focos": "INPE – Programa Queimadas (dataserver-coids.inpe.br)",
@@ -160,7 +243,8 @@ def main():
             "car": "SICAR – Cadastro Ambiental Rural (geoserver.car.gov.br)",
             "uc": "MMA – Cadastro Nacional de Unidades de Conservação",
             "ti": "FUNAI – Terras Indígenas (geoserver.funai.gov.br)",
-            "municipios": "IBGE – Malhas territoriais",
+            "municipios": "IBGE – Malhas territoriais; sedes: compilação aberta kelvins/municipios-brasileiros",
+            "vias": "OpenStreetMap – rodovias principais (Overpass API)",
         },
     }
     (saida / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

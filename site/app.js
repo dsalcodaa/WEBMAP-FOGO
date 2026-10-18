@@ -1,125 +1,116 @@
-const CORES_CAT = ['#f2994a', '#3fbf7f', '#e5c547', '#8c96a3'];
-const STATUS_CAR = { AT: 'Ativo', PE: 'Pendente', SU: 'Suspenso', CA: 'Cancelado' };
-const TIPO_CAR = { IRU: 'Imóvel rural', AST: 'Assentamento', PCT: 'Povos e comunidades tradicionais' };
-const DIA_MS = 86400000;
+let D, estado, map, mapaPronto = false;
+const graficos = {};
 
-const BASES = {
-  escuro: {
-    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
-    attribution: 'Base © Esri, HERE, Garmin, © OpenStreetMap',
-    maxzoom: 16,
-  },
-  satelite: {
-    tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-    attribution: 'Imagens © Esri, Maxar, Earthstar Geographics',
-  },
-};
-
-const $ = sel => document.querySelector(sel);
-const fmt = n => n.toLocaleString('pt-BR');
-const fmtHa = n => `${fmt(Math.round(n))} ha`;
-const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-const estado = { de: 0, ate: 365, sat: -1, mun: -1, cats: new Set([0, 1, 2, 3]) };
-let F, geo = {}, map, graficos = {}, mapaPronto = false;
-
-async function carregar() {
-  const nomes = ['focos.json', 'meta.json', 'car.geojson', 'uc.geojson', 'ti.geojson', 'eventos.geojson', 'municipios.geojson'];
-  const [focos, meta, car, uc, ti, eventos, mun] = await Promise.all(
-    nomes.map(n => fetch(`data/${n}`).then(r => { if (!r.ok) throw new Error(n); return r.json(); })));
-  F = focos;
-  geo = { car, uc, ti, eventos, mun, meta };
-  F.n = F.lat.length;
-  F.dia0 = Date.UTC(F.ano, 0, 1);
-  F.ultimoDia = F.dia.reduce((a, b) => Math.max(a, b), 0);
-}
-
-const diaParaData = d => new Date(F.dia0 + d * DIA_MS).toISOString().slice(0, 10);
-const dataParaDia = s => Math.round((Date.parse(s) - F.dia0) / DIA_MS);
+let P = { ...PARAMS_PADRAO };
+try { Object.assign(P, JSON.parse(localStorage.getItem('params') || '{}')); } catch { /* sem storage */ }
 
 // ---------------------------------------------------------------- filtros
 
 function montarFiltros() {
-  const de = $('#f-de'), ate = $('#f-ate');
-  de.min = ate.min = diaParaData(0);
-  de.max = ate.max = diaParaData(F.ultimoDia);
-  aplicarAtalho(30);
+  const F = D.F, de = $('#f-de'), ate = $('#f-ate');
+  de.min = ate.min = diaParaData(D, 0);
+  de.max = ate.max = diaParaData(D, F.ultimo_dia);
+  sincronizarDatas();
 
-  F.satelites.forEach((s, i) => $('#f-sat').add(new Option(s, i)));
   F.municipios.forEach((m, i) => $('#f-mun').add(new Option(m, i)));
-  F.categorias.forEach((c, i) => {
-    $('#f-cat').insertAdjacentHTML('beforeend',
-      `<label><input type="checkbox" value="${i}" checked><span class="bolinha" style="background:${CORES_CAT[i]}"></span>${c}</label>`);
-  });
+  Object.entries(METODOS).forEach(([k, m]) => $('#f-metodo').add(new Option(m.nome, k)));
+  $('#f-cat').innerHTML = F.categorias.map((c, i) =>
+    `<label class="chip"><input type="checkbox" value="${i}" checked><span class="bolinha" style="background:${CORES_CAT[i]}"></span>${c}</label>`).join('');
 
-  de.onchange = ate.onchange = () => { estado.de = dataParaDia(de.value); estado.ate = dataParaDia(ate.value); atualizar(); };
-  $('#f-sat').onchange = e => { estado.sat = +e.target.value; atualizar(); };
-  $('#f-mun').onchange = e => { estado.mun = +e.target.value; atualizar(); zoomMunicipio(estado.mun); };
+  de.onchange = ate.onchange = () => {
+    estado.de = Math.max(0, dataParaDia(D, de.value));
+    estado.ate = Math.min(F.ultimo_dia, Math.max(estado.de, dataParaDia(D, ate.value)));
+    sincronizarDatas();
+    atualizar();
+  };
+  document.querySelectorAll('.atalhos button').forEach(b => b.onclick = () => {
+    const dias = +b.dataset.dias;
+    estado.ate = F.ultimo_dia;
+    estado.de = dias ? Math.max(0, F.ultimo_dia - dias + 1) : 0;
+    sincronizarDatas();
+    atualizar();
+  });
+  $('#f-mun').onchange = e => selecionarMunicipio(+e.target.value);
+  $('#f-metodo').onchange = e => { estado.metodo = e.target.value; atualizar(); };
   $('#f-cat').onchange = () => {
     estado.cats = new Set([...document.querySelectorAll('#f-cat input:checked')].map(i => +i.value));
     atualizar();
   };
-  document.querySelectorAll('.atalhos button').forEach(b => b.onclick = () => { aplicarAtalho(+b.dataset.dias); atualizar(); });
+  document.querySelectorAll('[data-ajuda]').forEach(b => b.onclick = () => ajuda(b.dataset.ajuda));
 }
 
-function aplicarAtalho(dias) {
-  estado.ate = F.ultimoDia;
-  estado.de = dias ? Math.max(0, F.ultimoDia - dias + 1) : 0;
-  $('#f-de').value = diaParaData(estado.de);
-  $('#f-ate').value = diaParaData(estado.ate);
+function sincronizarDatas() {
+  $('#f-de').value = diaParaData(D, estado.de);
+  $('#f-ate').value = diaParaData(D, estado.ate);
+  document.querySelectorAll('.atalhos button').forEach(b => {
+    const dias = +b.dataset.dias;
+    const ok = estado.ate === D.F.ultimo_dia && (dias ? estado.de === Math.max(0, D.F.ultimo_dia - dias + 1) : estado.de === 0);
+    b.classList.toggle('ativo', ok);
+  });
 }
 
-function passa(i) {
-  const d = F.dia[i];
-  return d >= estado.de && d <= estado.ate
-    && (estado.sat < 0 || F.sat[i] === estado.sat)
-    && (estado.mun < 0 || F.mun[i] === estado.mun)
-    && estado.cats.has(F.cat[i]);
+function selecionarMunicipio(m) {
+  estado.mun = m;
+  $('#f-mun').value = m;
+  atualizar();
+  if (mapaPronto) zoomMunicipio(m);
 }
 
-// ---------------------------------------------------------------- agregação
-
-function agregar() {
-  const nDias = estado.ate - estado.de + 1;
-  const porDia = F.categorias.map(() => new Array(nDias).fill(0));
-  const porCat = new Array(F.categorias.length).fill(0);
-  const porMun = new Map(), porCar = new Map(), porUc = new Map(), porTi = new Map();
-  let total = 0;
-  const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-  for (let i = 0; i < F.n; i++) {
-    if (!passa(i)) continue;
-    total++;
-    const c = F.cat[i];
-    porDia[c][F.dia[i] - estado.de]++;
-    porCat[c]++;
-    if (F.mun[i] >= 0) inc(porMun, F.mun[i]);
-    if (F.car[i] >= 0) inc(porCar, F.car[i]);
-    if (F.uc[i] >= 0) inc(porUc, F.uc[i]);
-    if (F.ti[i] >= 0) inc(porTi, F.ti[i]);
+function ajuda(tema) {
+  if (tema === 'metodo') {
+    $('#dlg-texto').innerHTML = '<h3>Como contar os focos</h3>' + Object.values(METODOS)
+      .map(m => `<p><b>${m.nome}</b><br>${m.desc}</p>`).join('') +
+      '<p>Veja a aba <b>Metodologia</b> para os detalhes.</p>';
   }
-  return { total, porDia, porCat, porMun, porCar, porUc, porTi, nDias };
+  $('#dlg-ajuda').showModal();
 }
 
-const maiores = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
-const indexar = fc => new Map(fc.features.map(f => [f.properties.i, f]));
+// ---------------------------------------------------------------- abas
 
-// ---------------------------------------------------------------- dashboard
+function mostrarAba(nome) {
+  if (!document.getElementById(`aba-${nome}`)) nome = 'painel';
+  document.querySelectorAll('.aba').forEach(s => { s.hidden = s.id !== `aba-${nome}`; });
+  document.querySelectorAll('#abas button').forEach(b => b.classList.toggle('ativa', b.dataset.aba === nome));
+  document.body.dataset.aba = nome;
+  if (nome === 'mapa') {
+    if (!map) iniciarMapa();
+    else map.resize();
+  }
+  if (location.hash !== `#${nome}`) history.replaceState(null, '', `#${nome}`);
+}
 
-function kpis(a) {
+function irParaMapa(f) {
+  mostrarAba('mapa');
+  const zoom = () => map.fitBounds(bboxGeom(f.geometry), { padding: 60, maxZoom: 13 });
+  mapaPronto ? zoom() : map.once('load', () => setTimeout(zoom, 100));
+}
+
+// ---------------------------------------------------------------- relatórios
+
+function abrirRelatorio(mun) {
+  const q = new URLSearchParams({
+    mun, de: diaParaData(D, estado.de), ate: diaParaData(D, estado.ate),
+    metodo: estado.metodo, cats: [...estado.cats].join(''),
+  });
+  window.open(`relatorio.html?${q}`, '_blank', 'noopener');
+}
+
+// ---------------------------------------------------------------- visão geral
+
+function kpis(a, t) {
   const pct = n => a.total ? `${Math.round(100 * n / a.total)}%` : '–';
-  const ativos = geo.eventos.features.filter(f => f.properties.status_evento === 'Ativo').length;
+  const evs = eventosDoFiltro(D, estado);
+  const ativos = evs.filter(p => p.status_evento === 'Ativo').length;
+  const criticos = evs.filter(p => p.classe === 'Crítica').length;
   const itens = [
-    [fmt(a.total), 'focos no filtro'],
-    [pct(a.porCat[2]), 'em imóveis CAR'],
-    [pct(a.porCat[3]), 'sem cadastro'],
-    [pct(a.porCat[1]), 'em UCs'],
-    [pct(a.porCat[0]), 'em TIs'],
-    [fmt(a.porCar.size), 'imóveis CAR atingidos'],
-    [fmt(a.porUc.size), 'UCs atingidas'],
-    [fmt(a.porTi.size), 'TIs atingidas'],
-    [fmt(ativos), 'eventos SIPAM ativos'],
+    [fmt(a.total), METODOS[estado.metodo].curto, `${fmtVar(variacao(t.atual, t.anterior))} 7 dias`],
+    [pct(a.porCat[2]), 'em imóveis do CAR', `${fmt(a.porCar.size)} imóveis atingidos`],
+    [pct(a.porCat[3]), 'em áreas sem cadastro', ''],
+    [pct(a.porCat[1] + a.porCat[0]), 'em áreas protegidas', `${a.porUc.size} UCs · ${a.porTi.size} TIs`],
+    [fmt(ativos), 'eventos de fogo ativos', 'agora, segundo o SIPAM'],
+    [fmt(criticos), 'eventos de prioridade crítica', '<a href="#mobilizacao" data-aba-link="mobilizacao">ver mobilização</a>'],
   ];
-  $('#kpis').innerHTML = itens.map(([v, r]) => `<div class="kpi"><b>${v}</b><span>${r}</span></div>`).join('');
+  return itens.map(([v, r, s]) => `<div class="kpi"><b>${v}</b><span>${r}</span><small>${s}</small></div>`).join('');
 }
 
 Chart.defaults.color = '#9aa3ae';
@@ -127,28 +118,26 @@ Chart.defaults.borderColor = '#2b323c';
 Chart.defaults.font.family = 'system-ui, sans-serif';
 
 function graficosAtualizar(a) {
-  const rotulos = Array.from({ length: a.nDias }, (_, k) => diaParaData(estado.de + k).slice(5).split('-').reverse().join('/'));
-  const dsDia = F.categorias.map((c, i) => ({ label: c, data: a.porDia[i], backgroundColor: CORES_CAT[i], stack: 's' }));
+  const rotulos = Array.from({ length: a.nDias }, (_, k) => dataBR(D, estado.de + k).slice(0, 5));
+  const dsDia = D.F.categorias.map((c, i) => ({ label: c, data: a.porDia[i], backgroundColor: CORES_CAT[i], stack: 's' }));
   const munTop = maiores(a.porMun, 12);
 
   if (!graficos.dia) {
     graficos.dia = new Chart($('#g-dia'), {
-      type: 'bar',
-      data: { labels: rotulos, datasets: dsDia },
+      type: 'bar', data: { labels: rotulos, datasets: dsDia },
       options: {
         maintainAspectRatio: false, animation: false,
         plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
-        scales: { x: { stacked: true, ticks: { maxTicksLimit: 10 } }, y: { stacked: true } },
+        scales: { x: { stacked: true, ticks: { maxTicksLimit: 12 } }, y: { stacked: true } },
       },
     });
     graficos.cat = new Chart($('#g-cat'), {
       type: 'doughnut',
-      data: { labels: F.categorias, datasets: [{ data: a.porCat, backgroundColor: CORES_CAT, borderWidth: 0 }] },
-      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10 } } } },
+      data: { labels: D.F.categorias, datasets: [{ data: a.porCat, backgroundColor: CORES_CAT, borderWidth: 0 }] },
+      options: { maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } },
     });
     graficos.mun = new Chart($('#g-mun'), {
-      type: 'bar',
-      data: { labels: [], datasets: [{ data: [], backgroundColor: '#ff6b2c' }] },
+      type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#ff6b2c' }] },
       options: {
         indexAxis: 'y', maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false } },
@@ -162,135 +151,156 @@ function graficosAtualizar(a) {
   graficos.cat.data.datasets[0].data = a.porCat;
   graficos.cat.update();
   graficos.mun.$ids = munTop.map(([m]) => m);
-  graficos.mun.data.labels = munTop.map(([m]) => F.municipios[m]);
+  graficos.mun.data.labels = munTop.map(([m]) => D.F.municipios[m]);
   graficos.mun.data.datasets[0].data = munTop.map(([, n]) => n);
   graficos.mun.update();
 }
 
-function tabelas(a) {
-  const car = indexar(geo.car), uc = indexar(geo.uc), ti = indexar(geo.ti);
+function tabelaMunicipios(a, t) {
+  const linhas = rankingMunicipios(D, estado, a, t).filter(r => r.focos || r.ativos).sort((x, y) => y.focos - x.focos);
+  $('#t-mun').innerHTML = '<tr><th>#</th><th>Município</th><th class="n">Focos no período</th><th class="n">Últimos 7 dias</th>' +
+    '<th>Tendência</th><th class="n">Eventos ativos</th><th>Maior prioridade</th><th></th></tr>' +
+    linhas.map((r, k) => {
+      const ev = D.eventos.features.find(f => f.properties.mun === r.m && f.properties.prioridade === r.maxPrio);
+      return `<tr data-mun="${r.m}" class="${r.m === estado.mun ? 'sel' : ''}"><td>${k + 1}</td><td><b>${esc(r.nome)}</b></td>` +
+        `<td class="n">${fmt(r.focos)}</td><td class="n">${fmt(r.s7)}</td><td>${fmtVar(r.var)}</td><td class="n">${r.ativos}</td>` +
+        `<td>${ev ? badgeClasse(ev.properties.classe) : '–'}</td>` +
+        `<td><button class="link" data-relatorio="${r.m}">relatório</button></td></tr>`;
+    }).join('');
+}
 
+function tabelasFundiarias(a) {
   $('#t-car').innerHTML = '<tr><th>Imóvel</th><th>Município</th><th class="n">Focos</th></tr>' +
     maiores(a.porCar, 15).map(([i, n]) => {
-      const p = car.get(i)?.properties || {};
-      return `<tr data-zoom="car:${i}"><td><span class="cod">${esc(p.cod)}</span><br>${esc(TIPO_CAR[p.tipo_imovel] || p.tipo_imovel)} · ${esc(STATUS_CAR[p.status] || p.status)} · ${fmtHa(p.area_ha || 0)}</td><td>${esc(p.municipio)}</td><td class="n">${fmt(n)}</td></tr>`;
+      const p = D.idx.car.get(i)?.properties || {};
+      return `<tr data-zoom="car:${i}"><td><span class="cod">${esc(p.cod)}</span><br><small>${esc(TIPO_CAR[p.tipo_imovel] || p.tipo_imovel)} · ${esc(STATUS_CAR[p.status] || p.status)} · ${fmtHa(p.area_ha)}</small></td><td>${esc(p.municipio)}</td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
-
-  $('#t-uc').innerHTML = '<tr><th>Unidade</th><th>Esfera</th><th class="n">Focos</th></tr>' +
+  $('#t-uc').innerHTML = '<tr><th>Unidade de conservação</th><th class="n">Focos</th></tr>' +
     maiores(a.porUc, 10).map(([i, n]) => {
-      const p = uc.get(i)?.properties || {};
-      return `<tr data-zoom="uc:${i}"><td>${esc(p.nome)}</td><td>${esc(p.esfera)}</td><td class="n">${fmt(n)}</td></tr>`;
+      const p = D.idx.uc.get(i)?.properties || {};
+      return `<tr data-zoom="uc:${i}"><td>${esc(p.nome)}<br><small>${esc(p.esfera)} · ${esc(p.grupo)}</small></td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
-
-  $('#t-ti').innerHTML = '<tr><th>Terra indígena</th><th>Etnia</th><th class="n">Focos</th></tr>' +
+  $('#t-ti').innerHTML = '<tr><th>Terra indígena</th><th class="n">Focos</th></tr>' +
     maiores(a.porTi, 10).map(([i, n]) => {
-      const p = ti.get(i)?.properties || {};
-      return `<tr data-zoom="ti:${i}"><td>${esc(p.nome)}</td><td>${esc(p.etnia)}</td><td class="n">${fmt(n)}</td></tr>`;
+      const p = D.idx.ti.get(i)?.properties || {};
+      return `<tr data-zoom="ti:${i}"><td>${esc(p.nome)}<br><small>${esc(p.etnia)} · ${esc(p.fase)}</small></td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
 }
 
-function tabelaEventos() {
-  const evs = geo.eventos.features
-    .filter(f => f.properties.n_car > 0)
-    .sort((a, b) => b.properties.area_car_ha - a.properties.area_car_ha)
-    .slice(0, 10);
-  $('#t-ev').innerHTML = '<tr><th>Evento</th><th>Município</th><th class="n">Imóveis</th><th class="n">Área em CAR</th></tr>' +
-    evs.map(f => {
-      const p = f.properties;
-      return `<tr data-zoom="eventos:${p.id_evento}"><td>#${p.id_evento}<br>${esc(p.status_evento)} · ${p.persistencia_dias} dias</td><td>${esc(p.municipio)}</td><td class="n">${p.n_car}</td><td class="n">${fmtHa(p.area_car_ha)}</td></tr>`;
+// ---------------------------------------------------------------- mobilização
+
+function tabelaMobilizacao(a, t) {
+  const evs = eventosDoFiltro(D, estado);
+  const conta = c => evs.filter(p => p.classe === c).length;
+  $('#kpis-mob').innerHTML = ['Crítica', 'Alta', 'Moderada', 'Baixa'].map(c =>
+    `<div class="kpi" style="border-left:4px solid ${CORES_CLASSE[c]}"><b>${conta(c)}</b><span>prioridade ${c.toLowerCase()}</span></div>`).join('') +
+    `<div class="kpi"><b>${evs.filter(p => p.status_evento === 'Ativo').length}</b><span>eventos ativos</span></div>`;
+
+  $('#t-mob').innerHTML = '<tr><th>#</th><th>Prioridade</th><th>Local</th><th class="n">Área</th><th class="n">Focos 48 h</th>' +
+    '<th>Atinge</th><th>Deslocamento sugerido</th><th class="n">Tempo</th><th class="n">Custo est.</th></tr>' +
+    evs.slice(0, 60).map((p, k) => {
+      const L = logistica(p, P), r = L[L.recomendado];
+      const sens = [p.terra_indigena && 'TI', p.unidade_conservacao && 'UC', p.quilombola && 'Quilombo',
+        p.projeto_assentamento && 'Assentamento'].filter(Boolean);
+      const det = Object.entries(MODAIS).map(([k2, nome]) => {
+        const m = L[k2];
+        return `<li class="${k2 === L.recomendado ? 'rec' : ''}"><b>${nome}</b>: ${m.viavel ? `${fmt(m.km)} km · ${fmtH(m.h)} · ${fmtR$(m.custo)}` : `sem rodovia a até ${P.terr_lim_via} km (mais próxima a ${fmt1(p.d_via_km)} km)`}</li>`;
+      }).join('');
+      return `<tr class="ev" data-ev="${p.id_evento}"><td>${k + 1}</td><td>${badgeClasse(p.classe)} <b>${fmt(p.prioridade)}</b></td>` +
+        `<td><b>${esc(p.municipio)}</b><br><small>${esc(p.status_evento)} · ${p.persistencia_dias} dias · evento #${p.id_evento}</small></td>` +
+        `<td class="n">${fmtHa(p.area_ha)}</td><td class="n">${p.focos_48h}</td><td>${sens.join(', ') || '–'}</td>` +
+        `<td>${MODAIS[L.recomendado]}<br><small>${L.recomendado === 'aer' ? 'de Manaus' : `de ${esc(L.origem)}`}</small></td>` +
+        `<td class="n">${fmtH(r.h)}</td><td class="n">${fmtR$(r.custo)}</td></tr>` +
+        `<tr class="det" data-det="${p.id_evento}" hidden><td></td><td colspan="8"><ul class="modais">${det}</ul>` +
+        `<p class="nota">Índice SIPAM: ${p.indice_sipam ?? 'sem índice'} · Sede mais próxima: ${esc(p.sede)} (${fmt1(p.d_sede_km)} km em linha reta) · ` +
+        `Manaus: ${fmt(p.d_manaus_km)} km · Área em imóveis CAR: ${fmtHa(p.area_car_ha)} (${p.n_car} imóveis) · Domínio: ${esc(p.dominio)}</p>` +
+        `<button class="btn" data-ver-ev="${p.id_evento}">Ver no mapa</button></td></tr>`;
     }).join('');
+
+  const linhas = rankingMunicipios(D, estado, a, t).filter(r => r.criticos || r.ativos)
+    .sort((x, y) => y.criticos - x.criticos || y.s7 - x.s7);
+  $('#t-mob-mun').innerHTML = '<tr><th>Município</th><th class="n">Críticos + altos</th><th class="n">Ativos</th>' +
+    '<th class="n">Focos 7 dias</th><th>Tendência</th><th></th></tr>' +
+    linhas.map(r => `<tr data-mun="${r.m}"><td><b>${esc(r.nome)}</b></td><td class="n">${r.criticos}</td><td class="n">${r.ativos}</td>` +
+      `<td class="n">${fmt(r.s7)}</td><td>${fmtVar(r.var)}</td><td><button class="link" data-relatorio="${r.m}">relatório</button></td></tr>`).join('');
 }
 
-document.addEventListener('click', e => {
-  const tr = e.target.closest('tr[data-zoom]');
-  if (!tr) return;
-  const [camada, id] = tr.dataset.zoom.split(':');
-  const chave = camada === 'eventos' ? 'id_evento' : 'i';
-  const f = geo[camada].features.find(f => String(f.properties[chave]) === id);
-  if (f) zoomFeicao(f);
-});
+function montarParams() {
+  const campos = [
+    ['Terrestre', [['terr_fator', 'Fator de tortuosidade', '×'], ['terr_vel', 'Velocidade média', 'km/h'],
+      ['terr_custo_km', 'Custo da viatura', 'R$/km'], ['terr_lim_via', 'Rodovia a até', 'km']]],
+    ['Fluvial', [['flu_fator', 'Fator de tortuosidade', '×'], ['flu_vel', 'Velocidade média', 'km/h'],
+      ['flu_custo_h', 'Custo da embarcação', 'R$/h']]],
+    ['Aéreo (de Manaus)', [['aer_vel', 'Velocidade de cruzeiro', 'km/h'], ['aer_acion_h', 'Tempo de acionamento', 'h'],
+      ['aer_custo_h', 'Custo da hora de voo', 'R$/h']]],
+  ];
+  $('#params').innerHTML = campos.map(([g, cs]) => `<fieldset><legend>${g}</legend>` +
+    cs.map(([k, r, u]) => `<label>${r}<span><input type="number" step="any" min="0" name="${k}" value="${P[k]}"> ${u}</span></label>`).join('') +
+    '</fieldset>').join('') + '<button type="button" class="btn" id="params-reset">Restaurar padrão</button>';
+  $('#params').oninput = e => {
+    const v = parseFloat(e.target.value);
+    if (!Number.isFinite(v) || v < 0) return;
+    P[e.target.name] = v;
+    try { localStorage.setItem('params', JSON.stringify(P)); } catch { /* sem storage */ }
+    atualizar();
+  };
+  $('#params-reset').onclick = () => {
+    P = { ...PARAMS_PADRAO };
+    try { localStorage.removeItem('params'); } catch { /* sem storage */ }
+    montarParams();
+    atualizar();
+  };
+}
+
+// ---------------------------------------------------------------- lateral do mapa
+
+function lateralMapa(a, t) {
+  const pct = n => a.total ? `${Math.round(100 * n / a.total)}%` : '–';
+  const evs = eventosDoFiltro(D, estado);
+  $('#kpis-mapa').innerHTML = [
+    [fmt(a.total), METODOS[estado.metodo].curto],
+    [pct(a.porCat[2]), 'em imóveis CAR'],
+    [evs.filter(p => p.status_evento === 'Ativo').length, 'eventos ativos'],
+    [evs.filter(p => p.classe === 'Crítica').length, 'prioridade crítica'],
+  ].map(([v, r]) => `<div class="kpi"><b>${v}</b><span>${r}</span></div>`).join('');
+  $('#lista-eventos').innerHTML = evs.slice(0, 8).map(p =>
+    `<li data-ver-ev="${p.id_evento}">${badgeClasse(p.classe)} <b>${esc(p.municipio)}</b><br><small>${fmtHa(p.area_ha)} · ${p.focos_48h} focos em 48 h · ${esc(p.status_evento)}</small></li>`).join('');
+  $('#lista-mun').innerHTML = maiores(a.porMun, 10).map(([m, n]) => {
+    const [s7, ant] = t.porMun.get(m) || [0, 0];
+    return `<li data-mun="${m}" class="${m === estado.mun ? 'sel' : ''}"><b>${esc(D.F.municipios[m])}</b> <span class="n">${fmt(n)}</span><br><small>7 dias: ${fmt(s7)} ${fmtVar(variacao(s7, ant))}</small></li>`;
+  }).join('');
+}
 
 // ---------------------------------------------------------------- mapa
 
-function bbox(geom) {
-  let b = [Infinity, Infinity, -Infinity, -Infinity];
-  const visit = c => typeof c[0] === 'number'
-    ? (b = [Math.min(b[0], c[0]), Math.min(b[1], c[1]), Math.max(b[2], c[0]), Math.max(b[3], c[1])])
-    : c.forEach(visit);
-  visit(geom.coordinates);
-  return [[b[0], b[1]], [b[2], b[3]]];
-}
-
-function zoomFeicao(f) {
-  map.fitBounds(bbox(f.geometry), { padding: 60, maxZoom: 14 });
-}
-
-function zoomMunicipio(i) {
-  if (i < 0) return map.fitBounds(bbox({ coordinates: geo.mun.features.map(f => f.geometry.coordinates) }), { padding: 20 });
-  const f = geo.mun.features.find(f => f.properties.i === i);
-  if (f) zoomFeicao(f);
-}
-
-function selecionarMunicipio(i) {
-  estado.mun = i;
-  $('#f-mun').value = i;
-  atualizar();
-  zoomMunicipio(i);
-}
-
-// só os focos do filtro vão para o mapa: o worker do MapLibre leva ~30 s para indexar o ano inteiro
-function focosGeoJSON() {
-  const features = [];
-  for (let i = 0; i < F.n; i++) {
-    if (!passa(i)) continue;
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [F.lon[i], F.lat[i]] },
-      properties: { k: i, c: F.cat[i] },
-    });
-  }
-  return { type: 'FeatureCollection', features };
-}
-
-function carregandoFocos(sim) {
-  $('#carregando').hidden = !sim;
-}
-
-function estiloBase(nome) {
-  return {
-    version: 8,
-    sources: { base: { type: 'raster', tileSize: 256, ...BASES[nome] } },
-    layers: [{ id: 'base', type: 'raster', source: 'base' }],
-  };
+function zoomMunicipio(m) {
+  if (m < 0) return map.fitBounds(bboxGeom({ coordinates: D.mun.features.map(f => f.geometry.coordinates) }), { padding: 20 });
+  const f = D.idx.mun.get(m);
+  if (f) map.fitBounds(bboxGeom(f.geometry), { padding: 40 });
 }
 
 function iniciarMapa() {
   map = new maplibregl.Map({
-    container: 'mapa',
-    style: estiloBase('escuro'),
-    center: [-63.5, -4.5],
-    zoom: 5,
+    container: 'mapa', style: estiloBase('escuro'), center: [-63.5, -4.5], zoom: 5,
     attributionControl: { compact: true },
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
 
   map.on('load', () => {
-    map.addSource('mun', { type: 'geojson', data: geo.mun, promoteId: 'i' });
-    map.addSource('uc', { type: 'geojson', data: geo.uc, promoteId: 'i' });
-    map.addSource('ti', { type: 'geojson', data: geo.ti, promoteId: 'i' });
-    map.addSource('car', { type: 'geojson', data: geo.car, promoteId: 'i' });
-    map.addSource('eventos', { type: 'geojson', data: geo.eventos, promoteId: 'id_evento' });
+    map.addSource('mun', { type: 'geojson', data: D.mun, promoteId: 'i' });
+    map.addSource('uc', { type: 'geojson', data: D.uc, promoteId: 'i' });
+    map.addSource('ti', { type: 'geojson', data: D.ti, promoteId: 'i' });
+    map.addSource('car', { type: 'geojson', data: D.car, promoteId: 'i' });
+    map.addSource('eventos', { type: 'geojson', data: D.eventos, promoteId: 'id_evento' });
+    map.addSource('sedes', { type: 'geojson', data: D.sedes });
     map.addSource('focos', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.on('sourcedata', e => { if (e.sourceId === 'focos' && map.isSourceLoaded('focos')) carregandoFocos(false); });
+    map.on('sourcedata', e => { if (e.sourceId === 'focos' && map.isSourceLoaded('focos')) $('#carregando').hidden = true; });
 
     const n = ['coalesce', ['feature-state', 'n'], 0];
     map.addLayer({
       id: 'mun-fill', type: 'fill', source: 'mun', layout: { visibility: 'none' },
-      paint: {
-        'fill-color': ['interpolate', ['linear'], n, 0, '#1d232b', 50, '#5a2a1a', 500, '#b3401a', 3000, '#ff6b2c'],
-        'fill-opacity': 0.75,
-      },
+      paint: { 'fill-color': ['interpolate', ['linear'], n, 0, '#1d232b', 20, '#5a2a1a', 200, '#b3401a', 1000, '#ff6b2c'], 'fill-opacity': 0.75 },
     });
     map.addLayer({ id: 'mun-line', type: 'line', source: 'mun', paint: { 'line-color': '#4a5563', 'line-width': 0.6 } });
     map.addLayer({ id: 'uc-fill', type: 'fill', source: 'uc', paint: { 'fill-color': '#3fbf7f', 'fill-opacity': 0.08 } });
@@ -305,14 +315,14 @@ function iniciarMapa() {
       },
     });
     map.addLayer({ id: 'car-line', type: 'line', source: 'car', minzoom: 7, paint: { 'line-color': '#e5c547', 'line-width': 0.7 } });
-    map.addLayer({ id: 'eventos-fill', type: 'fill', source: 'eventos', paint: { 'fill-color': '#ff3b3b', 'fill-opacity': 0.35 } });
-    map.addLayer({ id: 'eventos-line', type: 'line', source: 'eventos', paint: { 'line-color': '#ff3b3b', 'line-width': 1.2 } });
+    map.addLayer({ id: 'eventos-fill', type: 'fill', source: 'eventos', paint: { 'fill-color': corClasse, 'fill-opacity': 0.35 } });
+    map.addLayer({ id: 'eventos-line', type: 'line', source: 'eventos', paint: { 'line-color': corClasse, 'line-width': 1.4 } });
     map.addLayer({
       id: 'focos-heat', type: 'heatmap', source: 'focos', maxzoom: 9,
       paint: {
-        'heatmap-weight': 0.25,
-        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 3, 3, 5, 4, 9, 10],
-        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 3, 1, 5, 0.5, 9, 1],
+        'heatmap-weight': 0.4,
+        'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 3, 3, 5, 5, 9, 12],
+        'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 3, 1, 5, 0.6, 9, 1.2],
         'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.9, 9, 0],
         'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
           0, 'rgba(0,0,0,0)', 0.2, '#5a1a0a', 0.45, '#b3261e', 0.7, '#ff6b2c', 1, '#ffe08a'],
@@ -327,20 +337,23 @@ function iniciarMapa() {
         'circle-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 1],
       },
     });
+    map.addLayer({
+      id: 'sedes', type: 'circle', source: 'sedes',
+      paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': '#000', 'circle-stroke-width': 1 },
+    });
 
     popups();
     mapaPronto = true;
     atualizar();
-    zoomMunicipio(-1);
+    zoomMunicipio(estado.mun);
   });
 
   const grupos = {
     focos: ['focos-heat', 'focos-pt'], eventos: ['eventos-fill', 'eventos-line'], car: ['car-fill', 'car-line'],
-    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'],
+    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'],
   };
   document.querySelectorAll('[data-camada]').forEach(cb => cb.onchange = () =>
     grupos[cb.dataset.camada].forEach(id => map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none')));
-
   document.querySelectorAll('input[name=base]').forEach(r => r.onchange = () => {
     map.removeLayer('base');
     map.removeSource('base');
@@ -348,59 +361,74 @@ function iniciarMapa() {
     map.addLayer({ id: 'base', type: 'raster', source: 'base' }, 'mun-fill');
   });
 
-  $('#legenda').innerHTML = '<span>Focos INPE:</span>' + F.categorias.map((c, i) =>
+  $('#legenda').innerHTML = '<b>Focos de calor</b>' + D.F.categorias.map((c, i) =>
     `<span><span class="bolinha" style="background:${CORES_CAT[i]}"></span> ${c}</span>`).join('') +
-    '<span><span class="bolinha" style="background:#ff3b3b;border-radius:2px"></span> Evento SIPAM (área queimando)</span>';
+    '<b>Eventos SIPAM por prioridade</b>' + Object.entries(CORES_CLASSE).map(([c, cor]) =>
+    `<span><span class="bolinha quadrada" style="background:${cor}"></span> ${c}</span>`).join('') +
+    '<span><span class="bolinha" style="background:#fff;border:1px solid #000"></span> Sede municipal</span>';
 }
 
 function popups() {
-  const popup = (e, html) => new maplibregl.Popup({ maxWidth: '320px' }).setLngLat(e.lngLat).setHTML(html).addTo(map);
+  const popup = (e, html) => new maplibregl.Popup({ maxWidth: '340px' }).setLngLat(e.lngLat).setHTML(html).addTo(map);
   const dl = pares => `<dl>${pares.filter(([, v]) => v !== null && v !== undefined && v !== '')
     .map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
   const nFocos = (src, id) => map.getFeatureState({ source: src, id })?.n || 0;
 
   // a ordem importa: o clique mostra só a camada mais específica sob o cursor
-  const ordem = ['focos-pt', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
+  const ordem = ['focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
   map.on('click', e => {
     const visiveis = ordem.filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
     const [f] = map.queryRenderedFeatures(e.point, { layers: visiveis });
     if (!f) return;
-    const p = f.properties;
-    const camada = f.layer.id;
-    if (camada === 'focos-pt') {
-      const i = p.k;
-      const car = F.car[i] >= 0 ? geo.car.features.find(x => x.properties.i === F.car[i])?.properties.cod : null;
-      const uc = F.uc[i] >= 0 ? geo.uc.features.find(x => x.properties.i === F.uc[i])?.properties.nome : null;
-      const ti = F.ti[i] >= 0 ? geo.ti.features.find(x => x.properties.i === F.ti[i])?.properties.nome : null;
-      popup(e, `<h3>Foco de calor</h3>` + dl([
-        ['Data', diaParaData(F.dia[i]).split('-').reverse().join('/')], ['Satélite', F.satelites[F.sat[i]]],
-        ['Município', F.municipios[F.mun[i]]], ['FRP', `${F.frp[i]} MW`], ['Situação', F.categorias[F.cat[i]]],
-        ['Imóvel CAR', car], ['UC', uc], ['TI', ti],
-      ]));
-    } else if (camada === 'eventos-fill') {
-      popup(e, `<h3>Evento de fogo SIPAM #${p.id_evento}</h3>` + dl([
-        ['Status', p.status_evento], ['Início', p.dt_minima?.slice(0, 10)], ['Última detecção', p.dt_maxima?.slice(0, 10)],
-        ['Persistência', `${p.persistencia_dias} dias`], ['Área', fmtHa(p.area_ha)], ['Município', p.municipio],
-        ['Domínio', p.dominio], ['Imóveis CAR atingidos', p.n_car], ['Área dentro de CAR', fmtHa(p.area_car_ha)],
-        ['TI', p.terra_indigena], ['UC', p.unidade_conservacao], ['Assentamento', p.projeto_assentamento],
-      ]));
-    } else if (camada === 'car-fill') {
-      popup(e, `<h3>Imóvel CAR</h3><div class="cod">${esc(p.cod)}</div>` + dl([
-        ['Tipo', TIPO_CAR[p.tipo_imovel] || p.tipo_imovel], ['Status', STATUS_CAR[p.status] || p.status],
-        ['Condição', p.condicao], ['Município', p.municipio], ['Área', fmtHa(p.area_ha)],
-        ['Focos (filtro)', nFocos('car', p.i)], ['Eventos SIPAM', p.n_eventos], ['Área em evento SIPAM', fmtHa(p.area_evento_ha)],
-      ]) + `<p><a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">Consulta pública do CAR</a></p>`);
-    } else if (camada === 'ti-fill') {
-      popup(e, `<h3>TI ${esc(p.nome)}</h3>` + dl([
-        ['Etnia', p.etnia], ['Fase', p.fase], ['Modalidade', p.modalidade_ti], ['Área', fmtHa(p.area_ha)], ['Focos (filtro)', nFocos('ti', p.i)],
-      ]));
-    } else if (camada === 'uc-fill') {
-      popup(e, `<h3>${esc(p.nome)}</h3>` + dl([
-        ['Categoria', p.categoria], ['Grupo', p.grupo], ['Esfera', p.esfera], ['Gestor', p.org_gestor],
-        ['Área', fmtHa(p.area_ha)], ['Focos (filtro)', nFocos('uc', p.i)],
-      ]));
-    } else if (camada === 'mun-fill') {
-      popup(e, `<h3>${esc(p.nome)}</h3>` + dl([['Focos (filtro)', nFocos('mun', p.i)]]));
+    const p = f.properties, F = D.F;
+    switch (f.layer.id) {
+      case 'focos-pt': {
+        const i = p.k;
+        popup(e, '<h3>Foco de calor</h3>' + dl([
+          ['Data', dataBR(D, F.dia[i])], ['Município', F.municipios[F.mun[i]]], ['Situação', F.categorias[F.cat[i]]],
+          ['Detecções no dia', `${F.n[i]} (${F.nref[i]} do satélite de referência)`], ['FRP máximo', `${F.frp[i]} MW`],
+          ['Imóvel CAR', F.car[i] >= 0 ? D.idx.car.get(F.car[i])?.properties.cod : null],
+          ['UC', F.uc[i] >= 0 ? D.idx.uc.get(F.uc[i])?.properties.nome : null],
+          ['TI', F.ti[i] >= 0 ? D.idx.ti.get(F.ti[i])?.properties.nome : null],
+        ]));
+        break;
+      }
+      case 'sedes':
+        popup(e, `<h3>${esc(p.nome)}</h3><p>Sede municipal</p>`);
+        break;
+      case 'eventos-fill': {
+        const L = logistica(p, P), r = L[L.recomendado];
+        popup(e, `<h3>Evento de fogo #${p.id_evento}</h3>${badgeClasse(p.classe)} prioridade <b>${fmt(p.prioridade)}</b>/100` + dl([
+          ['Status', p.status_evento], ['Início', p.dt_minima?.slice(0, 10).split('-').reverse().join('/')],
+          ['Última detecção', p.dt_maxima?.slice(0, 10).split('-').reverse().join('/')],
+          ['Persistência', `${p.persistencia_dias} dias`], ['Área de influência', fmtHa(p.area_ha)],
+          ['Focos em 48 h', p.focos_48h], ['Índice SIPAM', p.indice_sipam], ['Município', p.municipio], ['Domínio', p.dominio],
+          ['Imóveis CAR atingidos', p.n_car], ['Área em imóveis CAR', fmtHa(p.area_car_ha)],
+          ['TI', p.terra_indigena], ['UC', p.unidade_conservacao], ['Assentamento', p.projeto_assentamento],
+          ['Deslocamento sugerido', `${MODAIS[L.recomendado]}: ${fmtH(r.h)}, ~${fmtR$(r.custo)}`],
+          ['Sede mais próxima', `${p.sede} (${fmt1(p.d_sede_km)} km)`],
+        ]));
+        break;
+      }
+      case 'car-fill':
+        popup(e, `<h3>Imóvel do CAR</h3><div class="cod">${esc(p.cod)}</div>` + dl([
+          ['Tipo', TIPO_CAR[p.tipo_imovel] || p.tipo_imovel], ['Status', STATUS_CAR[p.status] || p.status],
+          ['Condição', p.condicao], ['Município', p.municipio], ['Área', fmtHa(p.area_ha)],
+          ['Focos no filtro', nFocos('car', p.i)], ['Eventos SIPAM', p.n_eventos], ['Área em evento SIPAM', fmtHa(p.area_evento_ha)],
+        ]) + '<p><a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">Consulta pública do CAR</a></p>');
+        break;
+      case 'ti-fill':
+        popup(e, `<h3>TI ${esc(p.nome)}</h3>` + dl([
+          ['Etnia', p.etnia], ['Fase', p.fase], ['Área', fmtHa(p.area_ha)], ['Focos no filtro', nFocos('ti', p.i)]]));
+        break;
+      case 'uc-fill':
+        popup(e, `<h3>${esc(p.nome)}</h3>` + dl([
+          ['Categoria', p.categoria], ['Esfera', p.esfera], ['Gestor', p.org_gestor], ['Área', fmtHa(p.area_ha)],
+          ['Focos no filtro', nFocos('uc', p.i)]]));
+        break;
+      case 'mun-fill':
+        popup(e, `<h3>${esc(p.nome)}</h3>` + dl([['Focos no filtro', nFocos('mun', p.i)]]));
+        break;
     }
   });
   ordem.forEach(id => {
@@ -418,31 +446,69 @@ function estadoMapa(a) {
   aplicar('uc', a.porUc);
   aplicar('ti', a.porTi);
   aplicar('mun', a.porMun);
-  carregandoFocos(true);
-  map.getSource('focos').setData(focosGeoJSON());
+  $('#carregando').hidden = false;
+  map.getSource('focos').setData(focosGeoJSON(D, estado));
 }
 
 // ---------------------------------------------------------------- ciclo
 
 function atualizar() {
-  const a = agregar();
-  kpis(a);
+  const a = agregar(D, estado), t = tendencia(D, estado);
+  $('#resumo').innerHTML = resumoTexto(D, estado, a, t);
+  $('#kpis').innerHTML = kpis(a, t);
   graficosAtualizar(a);
-  tabelas(a);
+  tabelaMunicipios(a, t);
+  tabelasFundiarias(a);
+  tabelaMobilizacao(a, t);
+  lateralMapa(a, t);
+  $('#rel-mun').title = estado.mun >= 0 ? `Relatório de ${D.F.municipios[estado.mun]}` : 'Escolha um município no filtro';
   if (mapaPronto) estadoMapa(a);
 }
 
-carregar().then(() => {
-  const m = geo.meta;
-  $('#atualizado').textContent = `Dados de ${m.ano} · atualizado em ${new Date(m.atualizado_em).toLocaleString('pt-BR')}`;
-  $('#fontes').innerHTML = '<strong>Fontes</strong><br>' + Object.values(m.fontes).map(esc).join('<br>') +
-    '<br><br>Classificação do foco: TI &gt; UC &gt; imóvel CAR &gt; sem cadastro. Imóveis CAR sobrepostos: o foco é atribuído ao menor polígono. ' +
-    'O CAR é autodeclaratório e não comprova propriedade.';
+document.addEventListener('click', e => {
+  const alvo = e.target.closest('[data-relatorio],[data-ver-ev],[data-zoom],[data-mun],tr.ev,[data-aba-link]');
+  if (!alvo) return;
+  if (alvo.dataset.relatorio !== undefined) { e.stopPropagation(); return abrirRelatorio(+alvo.dataset.relatorio); }
+  if (alvo.dataset.abaLink) { e.preventDefault(); return mostrarAba(alvo.dataset.abaLink); }
+  if (alvo.dataset.verEv) {
+    const f = D.eventos.features.find(f => String(f.properties.id_evento) === alvo.dataset.verEv);
+    return f && irParaMapa(f);
+  }
+  if (alvo.dataset.zoom) {
+    const [camada, id] = alvo.dataset.zoom.split(':');
+    const f = D.idx[camada].get(+id);
+    return f && irParaMapa(f);
+  }
+  if (alvo.matches('tr.ev')) {
+    const det = document.querySelector(`tr[data-det="${alvo.dataset.ev}"]`);
+    det.hidden = !det.hidden;
+    alvo.classList.toggle('aberto', !det.hidden);
+    return;
+  }
+  if (alvo.dataset.mun !== undefined) selecionarMunicipio(+alvo.dataset.mun);
+});
+
+carregarDados().then(dados => {
+  D = dados;
+  estado = estadoInicial(D, 30);
+  const m = D.meta;
+  $('#atualizado').innerHTML = `Atualizado em <b>${new Date(m.atualizado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</b>`;
+  $('#rodape').innerHTML = `Um produto <b>${esc(PRODUTO)}</b> · Dados públicos: INPE, Censipam/SIPAM, SICAR, MMA, FUNAI, IBGE, OpenStreetMap · ` +
+    'Atualização diária automática · <a href="#metodologia" data-aba-link="metodologia">Metodologia</a> · ' +
+    '<a href="https://github.com/dsalcodaa/WEBMAP-FOGO" target="_blank" rel="noopener">Código aberto</a>';
+  $('#aba-metodologia').innerHTML = textoMetodologia(m, true);
   montarFiltros();
-  tabelaEventos();
-  iniciarMapa();
+  montarParams();
+  document.querySelectorAll('#abas button').forEach(b => b.onclick = () => mostrarAba(b.dataset.aba));
+  $('#rel-estado').onclick = () => abrirRelatorio(-1);
+  $('#rel-mun').onclick = () => {
+    if (estado.mun >= 0) return abrirRelatorio(estado.mun);
+    $('#dlg-texto').innerHTML = '<h3>Relatório do município</h3><p>Escolha um município no filtro <b>Município</b> ou clique em "relatório" no ranking de municípios.</p>';
+    $('#dlg-ajuda').showModal();
+  };
   atualizar();
+  mostrarAba(location.hash.slice(1) || 'painel');
 }).catch(err => {
-  $('#atualizado').textContent = `Erro ao carregar dados: ${err.message}. Rode pipeline/build.py.`;
+  $('#atualizado').textContent = `Erro ao carregar dados: ${err.message}`;
   console.error(err);
 });

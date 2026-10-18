@@ -4,6 +4,7 @@ import re
 import ssl
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import geopandas as gpd
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
-from shapely.geometry import shape
+from shapely.geometry import LineString, shape
 
 UF = "AM"
 UF_IBGE = 13
@@ -24,6 +25,9 @@ FUNAI_WFS = "https://geoserver.funai.gov.br/geoserver/Funai/ows"
 CNUC_DATASET = "https://dados.mma.gov.br/dataset/unidadesdeconservacao"
 IBGE_MALHA = "https://servicodados.ibge.gov.br/api/v3/malhas/estados/{uf}"
 IBGE_MUNICIPIOS = "https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf}/municipios"
+# coordenadas das sedes municipais (compilação aberta baseada no IBGE; a API do IBGE não traz coordenadas)
+SEDES_CSV = "https://raw.githubusercontent.com/kelvins/municipios-brasileiros/main/csv/municipios.csv"
+OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 
 
 class _LegacyTLS(HTTPAdapter):
@@ -100,6 +104,25 @@ def eventos_sipam() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(linhas, geometry="geometry", crs=CRS)
 
 
+def prioridades_sipam(ids) -> dict:
+    """Índice de prioridade de acionamento do SIPAM por evento.
+    A listagem em lote só devolve os 999 maiores do país; os demais vêm do histórico de cada evento."""
+    indice = {p["id_evento"]: p["indice"]
+              for p in get(f"{SIPAM_BASE}/eventos/prioridades", params={"limite": 999}).json()}
+    faltam = [i for i in ids if i not in indice]
+
+    def ultimo(i):
+        try:
+            hist = get(f"{SIPAM_BASE}/eventos/{i}/prioridades", tentativas=2, timeout=60).json()
+        except requests.RequestException:
+            return i, None
+        return i, max(hist, key=lambda h: h["dt_maxima"])["indice"] if hist else None
+
+    with ThreadPoolExecutor(6) as ex:
+        indice.update(dict(ex.map(ultimo, faltam)))
+    return {i: indice.get(i) for i in ids}
+
+
 # ---------------------------------------------------------------- SICAR
 
 def imoveis_car(cache: Path, max_idade_dias=7, pagina=5000) -> gpd.GeoDataFrame:
@@ -149,6 +172,46 @@ def municipios() -> gpd.GeoDataFrame:
     gdf["cod_ibge"] = gdf["codarea"].astype(str)
     gdf["nome"] = gdf["cod_ibge"].map(nomes)
     return gdf[["cod_ibge", "nome", "geometry"]]
+
+
+def sedes_municipais() -> gpd.GeoDataFrame:
+    df = pd.read_csv(io.BytesIO(get(SEDES_CSV).content), dtype={"codigo_ibge": str})
+    df = df[df.codigo_uf == UF_IBGE]
+    return gpd.GeoDataFrame(
+        {"cod_ibge": df.codigo_ibge, "nome": df.nome, "capital": df.capital == 1},
+        geometry=gpd.points_from_xy(df.longitude, df.latitude), crs=CRS).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------- OpenStreetMap
+
+def vias_osm(cache: Path, max_idade_dias=30) -> gpd.GeoDataFrame:
+    """Rodovias principais (trunk a tertiary) da UF via Overpass. Cache local de 30 dias."""
+    if cache.exists() and (time.time() - cache.stat().st_mtime) < max_idade_dias * 86400:
+        return gpd.read_parquet(cache)
+    consulta = (f'[out:json][timeout:170];area["ISO3166-2"="BR-{UF}"]->.a;'
+                'way["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"](area.a);out geom;')
+    for url in OVERPASS:
+        try:
+            r = session.post(url, data={"data": consulta}, timeout=240)
+            r.raise_for_status()
+            elementos = r.json()["elements"]
+            break
+        except (requests.RequestException, ValueError) as e:
+            print("  Overpass falhou:", url, e)
+    else:
+        if cache.exists():
+            print("  usando cache antigo de vias")
+            return gpd.read_parquet(cache)
+        raise RuntimeError("Overpass indisponível e sem cache de vias")
+
+    linhas = [e for e in elementos if len(e.get("geometry", [])) > 1]
+    gdf = gpd.GeoDataFrame(
+        {"highway": [e["tags"].get("highway") for e in linhas]},
+        geometry=[LineString([(p["lon"], p["lat"]) for p in e["geometry"]]) for e in linhas],
+        crs="EPSG:4326").to_crs(CRS)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(cache)
+    return gdf
 
 
 # ---------------------------------------------------------------- MMA / CNUC

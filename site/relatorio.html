@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relatório de fogo · NEX</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="relatorio.css">
+</head>
+<body>
+  <div class="barra-acoes">
+    <button id="imprimir" disabled>Preparando relatório…</button>
+    <a href="index.html">Voltar ao painel</a>
+  </div>
+
+  <article class="folha" id="folha">
+    <header class="cab">
+      <div class="marca"><span class="nex">NEX</span><span>Hub de Análises Estratégicas</span></div>
+      <div class="cab-dir" id="gerado"></div>
+    </header>
+    <h1 id="titulo">Relatório de focos de calor e eventos de fogo</h1>
+    <p class="sub" id="subtitulo"></p>
+
+    <section>
+      <h2>Resumo</h2>
+      <p class="resumo" id="resumo"></p>
+      <div class="kpis" id="kpis"></div>
+    </section>
+
+    <section>
+      <h2>Mapa</h2>
+      <div id="mapa"></div>
+      <p class="legenda" id="legenda"></p>
+    </section>
+
+    <section class="duas">
+      <div>
+        <h2>Focos por dia</h2>
+        <div class="grafico"><canvas id="g-dia"></canvas></div>
+      </div>
+      <div>
+        <h2>Onde caíram os focos</h2>
+        <div class="grafico"><canvas id="g-cat"></canvas></div>
+      </div>
+    </section>
+
+    <section id="sec-mun">
+      <h2>Ranking dos municípios</h2>
+      <table id="t-mun"></table>
+    </section>
+
+    <section class="quebra">
+      <h2>Prioridades de mobilização</h2>
+      <p class="nota" id="nota-mob"></p>
+      <table id="t-mob"></table>
+    </section>
+
+    <section>
+      <h2>Imóveis do CAR com mais focos</h2>
+      <p class="nota">Códigos do Cadastro Ambiental Rural. O CAR público não informa o nome do declarante (LGPD), é
+        autodeclaratório e não comprova propriedade nem autoria do fogo.</p>
+      <table id="t-car"></table>
+    </section>
+
+    <section class="duas">
+      <div>
+        <h2>Unidades de conservação</h2>
+        <table id="t-uc"></table>
+      </div>
+      <div>
+        <h2>Terras indígenas</h2>
+        <table id="t-ti"></table>
+      </div>
+    </section>
+
+    <section class="quebra metodologia" id="metodologia">
+      <h2>Metodologia resumida</h2>
+    </section>
+
+    <footer class="rod" id="rodape"></footer>
+  </article>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="nucleo.js"></script>
+  <script src="metodologia.js"></script>
+  <script src="relatorio.js"></script>
+</body>
+</html>

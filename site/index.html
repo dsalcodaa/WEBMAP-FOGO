@@ -3,100 +3,172 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fogo no Amazonas</title>
-  <meta name="description" content="Cruzamento de focos de calor (INPE) e eventos de fogo (SIPAM) com imóveis do CAR, unidades de conservação e terras indígenas no Amazonas.">
+  <title>Fogo no Amazonas · NEX</title>
+  <meta name="description" content="Painel público de focos de calor (INPE) e eventos de fogo (SIPAM) no Amazonas, cruzados com imóveis do CAR, unidades de conservação e terras indígenas. Um produto NEX – Hub de Análises Estratégicas.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topo">
-    <h1>Fogo no Amazonas <span>quem, onde, quando</span></h1>
-    <div class="atualizado" id="atualizado">carregando dados…</div>
+    <div class="marca">
+      <span class="nex">NEX</span>
+      <div>
+        <h1>Fogo no Amazonas</h1>
+        <small>Hub de Análises Estratégicas</small>
+      </div>
+    </div>
+    <nav class="abas" id="abas">
+      <button data-aba="painel" class="ativa">Visão geral</button>
+      <button data-aba="mapa">Mapa interativo</button>
+      <button data-aba="mobilizacao">Mobilização</button>
+      <button data-aba="metodologia">Metodologia</button>
+    </nav>
+    <div class="acoes">
+      <button id="rel-estado" class="btn">Relatório do estado</button>
+      <button id="rel-mun" class="btn">Relatório do município</button>
+    </div>
   </header>
 
-  <main class="layout">
-    <aside class="painel">
-      <section class="filtros">
-        <h2>Filtros</h2>
-        <label>De <input type="date" id="f-de"></label>
-        <label>Até <input type="date" id="f-ate"></label>
-        <div class="atalhos">
-          <button data-dias="7">7 dias</button>
-          <button data-dias="30">30 dias</button>
-          <button data-dias="90">90 dias</button>
-          <button data-dias="0">Ano</button>
-        </div>
-        <label>Satélite <select id="f-sat"><option value="-1">Todos</option></select></label>
-        <label>Município <select id="f-mun"><option value="-1">Todos</option></select></label>
-        <fieldset id="f-cat"><legend>Situação fundiária do foco</legend></fieldset>
-      </section>
-
-      <section class="kpis" id="kpis"></section>
-
-      <section class="bloco">
-        <h2>Focos por dia</h2>
-        <div class="grafico alto"><canvas id="g-dia"></canvas></div>
-      </section>
-
-      <section class="bloco">
-        <h2>Onde caem os focos</h2>
-        <div class="grafico"><canvas id="g-cat"></canvas></div>
-      </section>
-
-      <section class="bloco">
-        <h2>Municípios com mais focos</h2>
-        <div class="grafico alto"><canvas id="g-mun"></canvas></div>
-      </section>
-
-      <section class="bloco">
-        <h2>Imóveis CAR com mais focos</h2>
-        <p class="nota">O CAR público não traz nome nem CPF/CNPJ do declarante (LGPD). Use o código na
-          <a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">consulta pública do CAR</a>.</p>
-        <table class="ranking" id="t-car"></table>
-      </section>
-
-      <section class="bloco">
-        <h2>Unidades de conservação</h2>
-        <table class="ranking" id="t-uc"></table>
-      </section>
-
-      <section class="bloco">
-        <h2>Terras indígenas</h2>
-        <table class="ranking" id="t-ti"></table>
-      </section>
-
-      <section class="bloco">
-        <h2>Eventos de fogo SIPAM com mais área em imóveis CAR</h2>
-        <p class="nota">Eventos ativos ou em observação agora. Não seguem os filtros de data.</p>
-        <table class="ranking" id="t-ev"></table>
-      </section>
-
-      <footer class="fontes" id="fontes"></footer>
-    </aside>
-
-    <section class="mapa-wrap">
-      <div id="mapa"></div>
-      <div class="camadas" id="camadas">
-        <strong>Camadas</strong>
-        <label><input type="checkbox" data-camada="focos" checked> Focos INPE</label>
-        <label><input type="checkbox" data-camada="eventos" checked> Eventos SIPAM</label>
-        <label><input type="checkbox" data-camada="car" checked> Imóveis CAR com fogo</label>
-        <label><input type="checkbox" data-camada="uc" checked> Unidades de conservação</label>
-        <label><input type="checkbox" data-camada="ti" checked> Terras indígenas</label>
-        <label><input type="checkbox" data-camada="mun"> Focos por município</label>
-        <div class="base">
-          <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
-          <label><input type="radio" name="base" value="satelite"> Satélite</label>
-        </div>
+  <section class="filtros" id="filtros">
+    <div class="campo periodo">
+      <span>Período</span>
+      <div class="linha">
+        <input type="date" id="f-de" aria-label="De">
+        <span>a</span>
+        <input type="date" id="f-ate" aria-label="Até">
       </div>
-      <div class="legenda" id="legenda"></div>
-      <div class="carregando" id="carregando" hidden>Carregando focos no mapa…</div>
+      <div class="atalhos">
+        <button data-dias="1">Hoje</button>
+        <button data-dias="7">7 dias</button>
+        <button data-dias="30">30 dias</button>
+        <button data-dias="90">90 dias</button>
+        <button data-dias="0">Ano</button>
+      </div>
+    </div>
+    <label class="campo">
+      <span>Município</span>
+      <select id="f-mun"><option value="-1">Todo o Amazonas</option></select>
+    </label>
+    <label class="campo">
+      <span>Como contar <button class="ajuda" data-ajuda="metodo" title="O que é isso?">?</button></span>
+      <select id="f-metodo"></select>
+    </label>
+    <div class="campo">
+      <span>Onde caiu o fogo</span>
+      <div class="chips" id="f-cat"></div>
+    </div>
+    <div class="atualizado" id="atualizado">carregando dados…</div>
+  </section>
+
+  <main>
+    <!-- VISÃO GERAL -->
+    <section class="aba" id="aba-painel">
+      <p class="resumo" id="resumo"></p>
+      <div class="kpis" id="kpis"></div>
+      <div class="grade">
+        <article class="cartao largo">
+          <h2>Focos por dia</h2>
+          <div class="grafico alto"><canvas id="g-dia"></canvas></div>
+        </article>
+        <article class="cartao">
+          <h2>Onde caem os focos</h2>
+          <div class="grafico"><canvas id="g-cat"></canvas></div>
+        </article>
+        <article class="cartao">
+          <h2>Municípios com mais focos</h2>
+          <div class="grafico alto"><canvas id="g-mun"></canvas></div>
+        </article>
+        <article class="cartao largo">
+          <h2>Ranking dos municípios</h2>
+          <p class="nota">Clique em um município para filtrar o painel. A tendência compara os últimos 7 dias com os 7 anteriores.</p>
+          <div class="rolagem"><table class="ranking" id="t-mun"></table></div>
+        </article>
+        <article class="cartao">
+          <h2>Imóveis do CAR com mais focos</h2>
+          <p class="nota">O CAR público não informa nome nem CPF/CNPJ do declarante (LGPD). Consulte o código na
+            <a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">consulta pública do CAR</a>.</p>
+          <div class="rolagem"><table class="ranking" id="t-car"></table></div>
+        </article>
+        <article class="cartao">
+          <h2>Unidades de conservação</h2>
+          <div class="rolagem"><table class="ranking" id="t-uc"></table></div>
+          <h2>Terras indígenas</h2>
+          <div class="rolagem"><table class="ranking" id="t-ti"></table></div>
+        </article>
+      </div>
     </section>
+
+    <!-- MAPA + PAINEL -->
+    <section class="aba mapa-layout" id="aba-mapa" hidden>
+      <aside class="lateral">
+        <div class="kpis compacto" id="kpis-mapa"></div>
+        <h2>Eventos prioritários</h2>
+        <ol class="lista" id="lista-eventos"></ol>
+        <h2>Municípios</h2>
+        <ol class="lista" id="lista-mun"></ol>
+      </aside>
+      <div class="mapa-wrap">
+        <div id="mapa"></div>
+        <div class="camadas">
+          <strong>Camadas</strong>
+          <label><input type="checkbox" data-camada="focos" checked> Focos de calor</label>
+          <label><input type="checkbox" data-camada="eventos" checked> Eventos SIPAM</label>
+          <label><input type="checkbox" data-camada="car" checked> Imóveis CAR com fogo</label>
+          <label><input type="checkbox" data-camada="uc" checked> Unidades de conservação</label>
+          <label><input type="checkbox" data-camada="ti" checked> Terras indígenas</label>
+          <label><input type="checkbox" data-camada="sedes" checked> Sedes municipais</label>
+          <label><input type="checkbox" data-camada="mun"> Focos por município</label>
+          <div class="base">
+            <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
+            <label><input type="radio" name="base" value="satelite"> Satélite</label>
+          </div>
+        </div>
+        <div class="legenda" id="legenda"></div>
+        <div class="carregando" id="carregando" hidden>Carregando focos no mapa…</div>
+      </div>
+    </section>
+
+    <!-- MOBILIZAÇÃO -->
+    <section class="aba" id="aba-mobilizacao" hidden>
+      <p class="resumo">Sugestão de onde mobilizar equipes, com base nos eventos de fogo ativos ou em observação do SIPAM.
+        Cada evento recebe um <b>índice de prioridade de 0 a 100</b>, que combina o índice oficial de acionamento do SIPAM,
+        os focos das últimas 48 horas, o tamanho, a duração e se atinge área protegida. Tempos e custos são
+        <b>estimativas de deslocamento</b> a partir da sede municipal mais próxima ou de Manaus.</p>
+      <div class="kpis" id="kpis-mob"></div>
+      <div class="grade">
+        <article class="cartao largo">
+          <h2>Eventos prioritários para mobilização</h2>
+          <div class="rolagem"><table class="ranking" id="t-mob"></table></div>
+        </article>
+        <article class="cartao">
+          <h2>Municípios que precisam de mobilização</h2>
+          <p class="nota">Ordenados pelo número de eventos de prioridade crítica ou alta e pelos focos dos últimos 7 dias.</p>
+          <div class="rolagem"><table class="ranking" id="t-mob-mun"></table></div>
+        </article>
+        <article class="cartao">
+          <h2>Premissas de deslocamento</h2>
+          <p class="nota">Ajuste os valores; tempos e custos são recalculados na hora. Custos são de ida e volta, só do deslocamento.</p>
+          <form class="params" id="params"></form>
+        </article>
+      </div>
+    </section>
+
+    <!-- METODOLOGIA -->
+    <section class="aba texto" id="aba-metodologia" hidden></section>
   </main>
+
+  <footer class="rodape" id="rodape"></footer>
+
+  <dialog id="dlg-ajuda">
+    <div id="dlg-texto"></div>
+    <form method="dialog"><button class="btn">Entendi</button></form>
+  </dialog>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="nucleo.js"></script>
+  <script src="metodologia.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
