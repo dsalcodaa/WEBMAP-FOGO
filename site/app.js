@@ -8,10 +8,12 @@ try { Object.assign(P, JSON.parse(localStorage.getItem('params') || '{}')); } ca
 
 function montarFiltros() {
   const F = D.F, de = $('#f-de'), ate = $('#f-ate');
-  de.min = ate.min = diaParaData(D, 0);
-  de.max = ate.max = diaParaData(D, F.ultimo_dia);
+  limitesDatas();
   sincronizarDatas();
 
+  (D.meta.anos || [{ ano: D.meta.ano }]).map(a => a.ano).sort((a, b) => b - a)
+    .forEach(a => $('#f-ano').add(new Option(a === anoAtual(D) ? `${a} (atual)` : a, a)));
+  $('#f-ano').onchange = e => trocarAno(+e.target.value);
   F.municipios.forEach((m, i) => $('#f-mun').add(new Option(m, i)));
   Object.entries(METODOS).forEach(([k, m]) => $('#f-metodo').add(new Option(m.nome, k)));
   $('#f-cat').innerHTML = F.categorias.map((c, i) =>
@@ -19,14 +21,14 @@ function montarFiltros() {
 
   de.onchange = ate.onchange = () => {
     estado.de = Math.max(0, dataParaDia(D, de.value));
-    estado.ate = Math.min(F.ultimo_dia, Math.max(estado.de, dataParaDia(D, ate.value)));
+    estado.ate = Math.min(D.F.ultimo_dia, Math.max(estado.de, dataParaDia(D, ate.value)));
     sincronizarDatas();
     atualizar();
   };
   document.querySelectorAll('.atalhos button').forEach(b => b.onclick = () => {
     const dias = +b.dataset.dias;
-    estado.ate = F.ultimo_dia;
-    estado.de = dias ? Math.max(0, F.ultimo_dia - dias + 1) : 0;
+    estado.ate = D.F.ultimo_dia;
+    estado.de = dias ? Math.max(0, D.F.ultimo_dia - dias + 1) : 0;
     sincronizarDatas();
     atualizar();
   });
@@ -37,6 +39,38 @@ function montarFiltros() {
     atualizar();
   };
   document.querySelectorAll('[data-ajuda]').forEach(b => b.onclick = () => ajuda(b.dataset.ajuda));
+}
+
+function limitesDatas() {
+  $('#f-de').min = $('#f-ate').min = diaParaData(D, 0);
+  $('#f-de').max = $('#f-ate').max = diaParaData(D, D.F.ultimo_dia);
+}
+
+async function trocarAno(ano) {
+  const sel = $('#f-ano');
+  sel.disabled = true;
+  try {
+    await carregarAno(D, ano);
+  } catch (err) {
+    sel.value = D.F.ano;
+    $('#dlg-texto').innerHTML = `<h3>Não foi possível carregar ${ano}</h3><p>${esc(err.message)}. Tente de novo mais tarde.</p>`;
+    $('#dlg-ajuda').showModal();
+    return;
+  } finally {
+    sel.disabled = false;
+  }
+  sel.value = ano;
+  // ano passado abre inteiro; o atual, nos últimos 30 dias
+  estado.ate = D.F.ultimo_dia;
+  estado.de = ano === anoAtual(D) ? Math.max(0, D.F.ultimo_dia - 29) : 0;
+  limitesDatas();
+  sincronizarDatas();
+  const aviso = $('#aviso-ano');
+  aviso.hidden = ano === anoAtual(D);
+  aviso.innerHTML = `Você está vendo os focos de <b>${ano}</b>. Eventos de fogo, mobilização e qualidade do ar mostram ` +
+    'a situação <b>de hoje</b>. Imóveis do CAR, unidades de conservação e terras indígenas usam os limites atuais.';
+  if (mapaPronto) map.getSource('car').setData(D.car);
+  atualizar();
 }
 
 function sincronizarDatas() {
@@ -97,7 +131,7 @@ function irParaMapa(f) {
 
 function abrirRelatorio(mun) {
   const q = new URLSearchParams({
-    mun, de: diaParaData(D, estado.de), ate: diaParaData(D, estado.ate),
+    mun, ano: D.F.ano, de: diaParaData(D, estado.de), ate: diaParaData(D, estado.ate),
     metodo: estado.metodo, cats: [...estado.cats].join(''),
   });
   window.open(`relatorio.html?${q}`, '_blank', 'noopener');
@@ -158,6 +192,20 @@ function graficosAtualizar(a) {
         onClick: (_, el) => { if (el.length) selecionarMunicipio(graficos.mun.$ids[el[0].index]); },
       },
     });
+  }
+  const anos = D.meta.anos || [];
+  if (!graficos.ano && anos.length) {
+    graficos.ano = new Chart($('#g-ano'), {
+      type: 'bar', data: { labels: anos.map(a => a.ano), datasets: [{ data: anos.map(a => a.ref) }] },
+      options: {
+        maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
+        onClick: (_, el) => { if (el.length) trocarAno(anos[el[0].index].ano); },
+      },
+    });
+  }
+  if (graficos.ano) {
+    graficos.ano.data.datasets[0].backgroundColor = anos.map(a => a.ano === D.F.ano ? '#ff6b2c' : '#5a6472');
+    graficos.ano.update();
   }
   graficos.dia.data.labels = rotulos;
   graficos.dia.data.datasets = dsDia;

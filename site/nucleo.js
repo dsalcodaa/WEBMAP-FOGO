@@ -63,14 +63,37 @@ async function carregarDados(base = 'data/') {
     nomes.map(n => fetch(base + n).then(r => { if (!r.ok) throw new Error(n); return r.json(); })));
   // qualidade do ar é opcional: sem o arquivo, o resto do painel funciona
   const ar = await fetch(base + 'ar.json').then(r => r.ok ? r.json() : null).catch(() => null);
-  F.n = F.lat.length;
-  F.dia0 = Date.UTC(F.ano, 0, 1);
-  const indexar = fc => new Map(fc.features.map(f => [f.properties.i, f]));
-  return {
+  prepararFocos(F);
+  const D = {
     F, meta, car, uc, ti, eventos, mun, sedes, ar: ar?.municipios?.length ? ar : null,
     idx: { car: indexar(car), uc: indexar(uc), ti: indexar(ti), mun: indexar(mun) },
+    base, anos: { [F.ano]: { F, car } },
   };
+  return D;
 }
+
+const indexar = fc => new Map(fc.features.map(f => [f.properties.i, f]));
+
+function prepararFocos(F) {
+  F.n = F.lat.length;
+  F.dia0 = Date.UTC(F.ano, 0, 1);
+}
+
+// troca os focos e os imóveis do CAR pelos de outro ano; eventos, ar e limites continuam os de hoje
+async function carregarAno(D, ano) {
+  if (!D.anos[ano]) {
+    const pegar = n => fetch(`${D.base}anos/${n}_${ano}.${n === 'car' ? 'geojson' : 'json'}`)
+      .then(r => { if (!r.ok) throw new Error(`dados de ${ano}`); return r.json(); });
+    const [F, car] = await Promise.all([pegar('focos'), pegar('car')]);
+    prepararFocos(F);
+    D.anos[ano] = { F, car };
+  }
+  D.F = D.anos[ano].F;
+  D.car = D.anos[ano].car;
+  D.idx.car = indexar(D.car);
+}
+
+const anoAtual = D => D.meta.ano;
 
 function diaParaData(D, d) { return new Date(D.F.dia0 + d * DIA_MS).toISOString().slice(0, 10); }
 function dataParaDia(D, s) { return Math.round((Date.parse(s) - D.F.dia0) / DIA_MS); }
@@ -115,10 +138,10 @@ function agregar(D, e) {
 }
 
 // últimos 7 dias completos até `e.ate` contra os 7 anteriores, por município (ignora o início do filtro).
-// O dia mais recente dos dados está incompleto (o INPE publica ao longo do dia) e não entra na comparação.
+// No ano corrente, o dia mais recente está incompleto (o INPE publica ao longo do dia) e não entra na comparação.
 function tendencia(D, e) {
   const F = D.F, w = pesoFoco(D, e.metodo);
-  const fim = Math.min(e.ate, F.ultimo_dia - 1);
+  const fim = Math.min(e.ate, F.fechado ? F.ultimo_dia : F.ultimo_dia - 1);
   const porMun = new Map();
   let atual = 0, anterior = 0;
   for (let i = 0; i < F.n; i++) {

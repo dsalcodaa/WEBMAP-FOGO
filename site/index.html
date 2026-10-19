@@ -31,6 +31,10 @@
   </header>
 
   <section class="filtros" id="filtros">
+    <label class="campo">
+      <span>Ano</span>
+      <select id="f-ano"></select>
+    </label>
     <div class="campo periodo">
       <span>Período</span>
       <div class="linha">
@@ -60,6 +64,7 @@
     </div>
     <div class="atualizado" id="atualizado">carregando dados…</div>
   </section>
+  <p class="aviso-ano" id="aviso-ano" hidden></p>
 
   <main>
     <!-- VISÃO GERAL -->
@@ -70,6 +75,11 @@
         <article class="cartao largo">
           <h2>Focos por dia</h2>
           <div class="grafico alto"><canvas id="g-dia"></canvas></div>
+        </article>
+        <article class="cartao largo">
+          <h2>Focos por ano no Amazonas</h2>
+          <p class="nota">Número oficial do INPE (satélite de referência), comparável entre os anos. Clique em um ano para vê-lo no painel.</p>
+          <div class="grafico"><canvas id="g-ano"></canvas></div>
         </article>
         <article class="cartao">
           <h2>Onde caem os focos</h2>

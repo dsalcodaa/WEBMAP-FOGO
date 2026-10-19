@@ -39,8 +39,11 @@ Site estático (GitHub Pages) atualizado todo dia às 07:00 (Brasília) por um G
 
 A explicação completa está na aba **Metodologia** do site.
 
-- **Contagem de focos.** O padrão é o **número oficial do INPE**: só o satélite de referência (AQUA_M-T, desde
-  2007; antes, NOAA-12), o mesmo usado pelo INPE, Ibama, governos e imprensa, comparável entre anos. Opções:
+- **Anos anteriores.** Seletor de ano desde 2003 (início da série oficial pelo satélite de referência), a partir
+  dos arquivos anuais do INPE (`anual/Brasil_todos_sats`). O recorte do AM de cada ano fica em `cache/historico/`
+  (cache próprio no Actions). CAR, UCs e TIs usam os limites atuais; eventos e qualidade do ar são sempre de hoje.
+- **Contagem de focos.** O padrão é o **número oficial do INPE**: só o satélite de referência (AQUA_M-T, usado em
+  toda a série oficial desde 2003), o mesmo usado pelo INPE, Ibama, governos e imprensa, comparável entre anos. Opções:
   *lugares com fogo por dia* (todos os satélites, uma célula de ~1 km por dia; método deste painel, não comparável
   com o oficial) e *todas as detecções* (uso técnico; conta o mesmo fogo ~3,6 vezes). Duplicatas entre os arquivos
   mensal e diário do INPE são removidas.

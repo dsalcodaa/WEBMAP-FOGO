@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -17,6 +18,7 @@ from shapely.geometry import LineString, Point, shape
 
 UF = "AM"
 UF_IBGE = 13
+UF_NOME = "AMAZONAS"  # como aparece nos arquivos anuais do INPE
 CRS = "EPSG:4674"  # SIRGAS 2000
 
 INPE_BASE = "https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv"
@@ -87,6 +89,31 @@ def focos_inpe(ano: int) -> gpd.GeoDataFrame:
         df[c] = pd.to_numeric(df[c].str.strip(), errors="coerce")
     df["data_hora_gmt"] = pd.to_datetime(df["data_hora_gmt"])
     df = df[df["data_hora_gmt"].dt.year == ano]
+    return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs=CRS)
+
+
+def focos_inpe_historico(ano: int, cache: Path) -> gpd.GeoDataFrame:
+    """Focos de um ano fechado (arquivo anual de todos os satélites, Brasil inteiro), filtrados para a UF.
+    O arquivo do Brasil chega a 110 MB; o recorte da UF fica em cache, pois anos passados não mudam."""
+    arq = cache / f"focos_{UF.lower()}_{ano}.parquet"
+    if arq.exists():
+        df = pd.read_parquet(arq)
+    else:
+        print(f"  INPE anual {ano}")
+        z = zipfile.ZipFile(io.BytesIO(get(f"{INPE_BASE}/anual/Brasil_todos_sats/focos_br_todos-sats_{ano}.zip",
+                                           timeout=900).content))
+        df = pd.read_csv(z.open(z.namelist()[0]), dtype=str,
+                         usecols=["latitude", "longitude", "data_pas", "satelite", "estado", "frp"])
+        df = df[df.estado.str.strip().str.upper() == UF_NOME].drop(columns="estado")
+        df = df.rename(columns={"latitude": "lat", "longitude": "lon", "data_pas": "data_hora_gmt"})
+        for c in ["lat", "lon", "frp"]:
+            df[c] = pd.to_numeric(df[c].str.strip(), errors="coerce")
+        df["satelite"] = df.satelite.str.strip()
+        df["data_hora_gmt"] = pd.to_datetime(df.data_hora_gmt)
+        df = df.reset_index(drop=True)
+        arq.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(arq)
+    df["id"] = np.arange(len(df))
     return gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs=CRS)
 
 

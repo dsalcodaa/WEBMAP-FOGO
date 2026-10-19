@@ -19,6 +19,7 @@ CATEGORIAS = ["Terra Indígena", "Unidade de Conservação", "Imóvel CAR", "Sem
 SAT_REFERENCIA = "AQUA_M-T"  # satélite de referência do INPE para séries comparáveis
 CELULA_GRAUS = 0.01          # ~1,1 km: um foco único por célula por dia
 BUFFER_EVENTO_M = 1000       # focos recentes contados até 1 km da borda do evento
+ANO_INICIAL = 2003           # início da série oficial do INPE pelo satélite de referência
 
 # pesos do índice de prioridade de mobilização (somam 100)
 PESOS = {"indice_sipam": 30, "focos_48h": 25, "area": 15, "persistencia": 10, "area_sensivel": 10, "ativo": 10}
@@ -50,9 +51,10 @@ def focos_unicos(focos: gpd.GeoDataFrame, dia0: pd.Timestamp) -> gpd.GeoDataFram
     f["cy"] = np.floor(f.lat / CELULA_GRAUS).astype(int)
     f["cx"] = np.floor(f.lon / CELULA_GRAUS).astype(int)
     f["ref"] = (f.satelite == SAT_REFERENCIA).astype(int)
-    u = f.groupby(["cy", "cx", "dia"], sort=False).agg(
-        lat=("lat", "first"), lon=("lon", "first"), n=("id", "size"), nref=("ref", "sum"),
-        frp=("frp", "max"), municipio_id=("municipio_id", "first")).reset_index()
+    agg = dict(lat=("lat", "first"), lon=("lon", "first"), n=("id", "size"), nref=("ref", "sum"), frp=("frp", "max"))
+    if "municipio_id" in f:  # só os arquivos mensais/diários trazem o código do município
+        agg["municipio_id"] = ("municipio_id", "first")
+    u = f.groupby(["cy", "cx", "dia"], sort=False).agg(**agg).reset_index()
     return gpd.GeoDataFrame(u, geometry=gpd.points_from_xy(u.lon, u.lat), crs=fontes.CRS)
 
 
@@ -85,6 +87,36 @@ def qualidade_ar(sedes: gpd.GeoDataFrame, mun_idx: dict, uf: gpd.GeoDataFrame) -
     return {"hora": hora, "municipios": municipios, "estacoes": fontes.ar_estacoes(uf)}
 
 
+def cruzar(focos: gpd.GeoDataFrame, car, uc, ti):
+    """Imóvel CAR, UC e TI de cada foco, e a categoria pela ordem de precedência TI > UC > CAR > sem cadastro."""
+    focos["car_i"] = poligono_mais_especifico(focos, car, "_i")
+    focos["uc_i"] = poligono_mais_especifico(focos, uc, "_i")
+    focos["ti_i"] = poligono_mais_especifico(focos, ti, "_i")
+    focos["cat"] = np.select([focos.ti_i >= 0, focos.uc_i >= 0, focos.car_i >= 0], [0, 1, 2], default=3)
+
+
+def colunas_focos(focos, ano, ultimo_dia, municipios, fechado):
+    """Focos únicos em formato colunar; os índices apontam para as listas e GeoJSONs do site."""
+    return {
+        "ano": ano,
+        "fechado": fechado,  # ano passado: o último dia está completo
+        "ultimo_dia": ultimo_dia,
+        "categorias": CATEGORIAS,
+        "municipios": municipios,
+        "lat": focos.lat.round(4).tolist(),
+        "lon": focos.lon.round(4).tolist(),
+        "dia": focos.dia.tolist(),
+        "n": focos.n.tolist(),
+        "nref": focos.nref.tolist(),
+        "mun": focos.mun_i.tolist(),
+        "cat": focos.cat.tolist(),
+        "car": focos.car_i.tolist(),
+        "uc": focos.uc_i.tolist(),
+        "ti": focos.ti_i.tolist(),
+        "frp": focos.frp.fillna(0).round(1).tolist(),
+    }
+
+
 def percentil(s: pd.Series) -> pd.Series:
     r = s.rank(pct=True)
     return r.where(s > 0, 0).fillna(0)
@@ -95,6 +127,7 @@ def main():
     ap.add_argument("--ano", type=int, default=date.today().year)
     ap.add_argument("--saida", default="site/data")
     ap.add_argument("--cache", default="cache")
+    ap.add_argument("--desde", type=int, default=ANO_INICIAL, help="primeiro ano do histórico")
     args = ap.parse_args()
     saida, cache = Path(args.saida), Path(args.cache)
     saida.mkdir(parents=True, exist_ok=True)
@@ -126,14 +159,14 @@ def main():
     ultimo_dia = int(focos.dia.max())
 
     print("8/9 cruzamentos")
-    for g in (uc, ti, car):
+    for g in (uc, ti, car, mun):
         g["_area"] = g.to_crs(CRS_METRICO).area
+    for g in (uc, ti, car):
         g["_i"] = np.arange(len(g))
 
-    focos["car_i"] = poligono_mais_especifico(focos, car, "_i")
-    focos["uc_i"] = poligono_mais_especifico(focos, uc, "_i")
-    focos["ti_i"] = poligono_mais_especifico(focos, ti, "_i")
-    focos["cat"] = np.select([focos.ti_i >= 0, focos.uc_i >= 0, focos.car_i >= 0], [0, 1, 2], default=3)
+    cruzar(focos, car, uc, ti)
+    mun_idx = {c: i for i, c in enumerate(mun.cod_ibge)}
+    focos["mun_i"] = focos.municipio_id.str.strip().map(mun_idx).fillna(-1).astype(int)
 
     # eventos SIPAM x CAR
     ev_m = eventos.to_crs(CRS_METRICO)
@@ -189,16 +222,19 @@ def main():
     eventos["classe"] = eventos.prioridade.map(lambda p: next(c for lim, c in CLASSES if p >= lim))
 
     print("9/9 saídas")
-    com_fogo = set(focos.loc[focos.car_i >= 0, "car_i"]) | set(queimada_por_car.index)
-    car_out = car[car._i.isin(com_fogo)].copy().join(queimada_por_car, on="_i")
-    car_out["area_evento_ha"] = car_out.area_evento_ha.fillna(0).round(1)
-    car_out["n_eventos"] = car_out.n_eventos.fillna(0).astype(int)
-    car_out["area_ha"] = (car_out._area / 1e4).round(1)
-    car_out = car_out.rename(columns={"_i": "i", "cod_imovel": "cod", "status_imovel": "status"})
-    escrever_geojson(
-        car_out[["i", "cod", "status", "condicao", "tipo_imovel", "municipio", "area_ha", "area_evento_ha",
-                 "n_eventos", "geometry"]],
-        saida / "car.geojson")
+    def escrever_car(ids, caminho, tolerancia=0.0002):
+        """Só os imóveis citados pelos focos (ou eventos), para o arquivo do site não ficar enorme."""
+        out = car[car._i.isin(ids)].copy().join(queimada_por_car, on="_i")
+        out["area_evento_ha"] = out.area_evento_ha.fillna(0).round(1)
+        out["n_eventos"] = out.n_eventos.fillna(0).astype(int)
+        out["area_ha"] = (out._area / 1e4).round(1)
+        out = out.rename(columns={"_i": "i", "cod_imovel": "cod", "status_imovel": "status"})
+        escrever_geojson(out[["i", "cod", "status", "condicao", "tipo_imovel", "municipio", "area_ha",
+                              "area_evento_ha", "n_eventos", "geometry"]], caminho, tolerancia)
+        return len(out)
+
+    n_car_com_fogo = escrever_car(set(focos.loc[focos.car_i >= 0, "car_i"]) | set(queimada_por_car.index),
+                                  saida / "car.geojson")
 
     uc["area_ha"] = (uc._area / 1e4).round(0)
     escrever_geojson(
@@ -219,27 +255,32 @@ def main():
     eventos["indice_sipam"] = eventos.indice_sipam.round(1)
     escrever_geojson(eventos, saida / "eventos.geojson", tolerancia=0.0001)
 
-    # focos únicos em formato colunar; índices apontam para as listas e GeoJSONs acima
-    mun_idx = {c: i for i, c in enumerate(mun.cod_ibge)}
-    colunas = {
-        "ano": args.ano,
-        "ultimo_dia": ultimo_dia,
-        "categorias": CATEGORIAS,
-        "municipios": mun.nome.tolist(),
-        "lat": focos.lat.round(4).tolist(),
-        "lon": focos.lon.round(4).tolist(),
-        "dia": focos.dia.tolist(),
-        "n": focos.n.tolist(),
-        "nref": focos.nref.tolist(),
-        "mun": focos.municipio_id.str.strip().map(mun_idx).fillna(-1).astype(int).tolist(),
-        "cat": focos.cat.tolist(),
-        "car": focos.car_i.tolist(),
-        "uc": focos.uc_i.tolist(),
-        "ti": focos.ti_i.tolist(),
-        "frp": focos.frp.fillna(0).round(1).tolist(),
-    }
+    colunas = colunas_focos(focos, args.ano, ultimo_dia, mun.nome.tolist(), fechado=False)
     (saida / "focos.json").write_text(json.dumps(colunas, separators=(",", ":")))
     print(f"  focos.json: {len(focos)} focos únicos, {(saida / 'focos.json').stat().st_size / 1e6:.1f} MB")
+    anos = [{"ano": args.ano, "ref": int(focos.nref.sum()), "unicos": len(focos), "brutas": n_deteccoes_brutas}]
+
+    # anos fechados: mesmos cruzamentos com os limites atuais de CAR, UC e TI. Um ano que falhar fica de fora.
+    print("   histórico de focos (INPE, arquivos anuais)")
+    (saida / "anos").mkdir(exist_ok=True)
+    for ano in range(args.desde, args.ano):
+        try:
+            det = fontes.focos_inpe_historico(ano, cache / "historico")
+            n_brutas = len(det)
+            det = det.drop_duplicates(["satelite", "data_hora_gmt", "lat", "lon"])
+            f = focos_unicos(det, pd.Timestamp(f"{ano}-01-01"))
+            cruzar(f, car, uc, ti)
+            f["mun_i"] = poligono_mais_especifico(f, mun, "i")
+            fim = (date(ano, 12, 31) - date(ano, 1, 1)).days
+            (saida / "anos" / f"focos_{ano}.json").write_text(
+                json.dumps(colunas_focos(f, ano, fim, mun.nome.tolist(), fechado=True), separators=(",", ":")))
+            # traço mais simples que o do ano atual: 23 anos de CAR precisam caber no limite de 1 GB do GitHub Pages
+            escrever_car(set(f.loc[f.car_i >= 0, "car_i"]), saida / "anos" / f"car_{ano}.geojson", tolerancia=0.0006)
+            anos.append({"ano": ano, "ref": int(f.nref.sum()), "unicos": len(f), "brutas": n_brutas})
+            print(f"   {ano}: {int(f.nref.sum())} focos (referência), {len(f)} lugares com fogo")
+        except Exception as e:  # noqa: BLE001
+            print(f"   {ano} ignorado: {e}")
+    anos.sort(key=lambda a: a["ano"])
 
     # qualidade do ar é complemento: se a API falhar, o site sai sem ela em vez de não atualizar
     try:
@@ -254,6 +295,7 @@ def main():
         "atualizado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
         "uf": fontes.UF,
         "ano": args.ano,
+        "anos": anos,
         "totais": {
             "deteccoes_brutas": n_deteccoes_brutas,
             "deteccoes_sem_duplicatas": len(deteccoes),
@@ -263,7 +305,7 @@ def main():
             "eventos_com_indice_sipam": int(eventos.indice_sipam.notna().sum()),
             "imoveis_car_uf": len(car),
             "imoveis_car_cancelados_excluidos": n_car_cancelados,
-            "imoveis_car_com_fogo": len(car_out),
+            "imoveis_car_com_fogo": n_car_com_fogo,
             "ucs": len(uc),
             "tis": len(ti),
             "vias_osm": len(vias),

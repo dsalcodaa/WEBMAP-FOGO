@@ -76,10 +76,24 @@ function textoMetodologia(meta, completo = true) {
           incêndios.</b></td>
         <td class="n">${fmt(t.deteccoes_brutas)}</td></tr>
     </table>
-    <p>Sobre o satélite de referência: o INPE usa um único satélite para que a série histórica seja comparável ano a
-      ano. Foi o NOAA-12 até 2007 e, desde então, é o AQUA (passagem da tarde). Também removemos
-      ${fmt(t.deteccoes_brutas - t.deteccoes_sem_duplicatas)} detecções repetidas entre os arquivos mensal e diário
-      do INPE.</p>
+    <p>Sobre o satélite de referência: o INPE usa sempre o mesmo satélite para que a série seja comparável ano a ano.
+      A série oficial atual usa o AQUA (passagem da tarde) desde 2003. Conferimos: para 2005, o arquivo oficial do INPE
+      para o Amazonas tem exatamente o mesmo número de focos que o AQUA tem no arquivo de todos os satélites. Também
+      removemos ${fmt(t.deteccoes_brutas - t.deteccoes_sem_duplicatas)} detecções repetidas entre os arquivos mensal
+      e diário do INPE.</p>
+
+    <h3>Anos anteriores</h3>
+    <p>O seletor <b>Ano</b> mostra os focos desde ${(meta.anos || [])[0]?.ano ?? meta.ano}, início da série oficial pelo
+      satélite de referência. Os dados vêm dos arquivos anuais do INPE e passam pelos mesmos cálculos do ano atual.
+      Atenção a três pontos:</p>
+    <ul>
+      <li>Imóveis do CAR, unidades de conservação e terras indígenas são os <b>limites de hoje</b>. Um foco de 2005
+        pode cair num imóvel cadastrado anos depois, ou numa unidade criada depois.</li>
+      <li>Eventos de fogo, mobilização e qualidade do ar mostram sempre a <b>situação de hoje</b>: o SIPAM não
+        disponibiliza o histórico de eventos.</li>
+      <li>Para comparar anos, use o <b>número oficial do INPE</b>. O número de satélites em órbita mudou muito desde
+        2003, então "lugares com fogo" e "todas as detecções" crescem só porque há mais satélites.</li>
+    </ul>
 
     <h3>3. Eventos de fogo (SIPAM)</h3>
     <p>O <b>Censipam</b>, órgão do Ministério da Defesa, mantém o Painel do Fogo. Ele junta focos próximos no espaço e

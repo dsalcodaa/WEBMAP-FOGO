@@ -78,6 +78,8 @@ function mapa(D, e) {
 }
 
 carregarDados().then(async D => {
+  const ano = +new URLSearchParams(location.search).get('ano');
+  if (ano && ano !== D.F.ano) await carregarAno(D, ano);
   const e = estadoDaUrl(D);
   const a = agregar(D, e), t = tendencia(D, e);
   const nomeLocal = e.mun >= 0 ? `Município de ${D.F.municipios[e.mun]} (AM)` : 'Estado do Amazonas';
@@ -86,7 +88,9 @@ carregarDados().then(async D => {
   document.title = `Relatório de fogo · ${e.mun >= 0 ? D.F.municipios[e.mun] : 'Amazonas'} · ${periodo} · NEX`;
   $('#titulo').textContent = `Fogo e qualidade do ar — ${nomeLocal}`;
   $('#subtitulo').innerHTML = `Período: <b>${periodo}</b> · Contagem: <b>${esc(METODOS[e.metodo].nome)}</b>` +
-    (e.cats.size < 4 ? ` · Categorias: ${[...e.cats].map(c => D.F.categorias[c]).join(', ')}` : '');
+    (e.cats.size < 4 ? ` · Categorias: ${[...e.cats].map(c => D.F.categorias[c]).join(', ')}` : '') +
+    (D.F.ano !== anoAtual(D) ? '<br>Eventos de fogo, mobilização e qualidade do ar mostram a situação de hoje; ' +
+      'CAR, UCs e TIs usam os limites atuais.' : '');
   $('#gerado').innerHTML = `Gerado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}<br>` +
     `Dados atualizados em ${new Date(D.meta.atualizado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
   $('#resumo').innerHTML = resumoTexto(D, e, a, t);
