@@ -37,8 +37,8 @@ function textoMetodologia(meta, completo = true) {
     <h2>Como este painel funciona</h2>
     <p class="destaque">Este painel é um produto <b>${esc(PRODUTO)}</b>. Ele junta dados públicos oficiais para
       mostrar, de forma simples, <b>onde o fogo está</b> no Amazonas, <b>em que tipo de terra</b>, <b>como está o ar</b>
-      que as pessoas respiram e <b>onde a resposta é mais urgente</b>. Tudo é atualizado sozinho todo dia às 07:00
-      (horário de Brasília).</p>
+      que as pessoas respiram e <b>onde a resposta é mais urgente</b>. Tudo é atualizado sozinho duas vezes por dia,
+      às 07:00 e às 21:00 (horário de Brasília).</p>
 
     <h3>De onde vêm os dados</h3>
     <ul>${fonte}</ul>
@@ -129,6 +129,9 @@ function textoMetodologia(meta, completo = true) {
         pesquisado na consulta pública do CAR.</li>
       <li><b>"Sem cadastro"</b> é tudo o que fica fora de TI, UC e CAR ativo: terra pública sem destinação, imóvel
         não cadastrado, rio ou várzea.</li>
+      <li><b>Coordenadas:</b> imóveis do CAR, unidades de conservação e terras indígenas mostram um ponto de
+        referência em graus decimais (latitude, longitude; SIRGAS 2000). O ponto fica sempre <b>dentro</b> da área,
+        mas não é a sede nem a entrada. Clique nele para abrir no mapa do celular.</li>
     </ul>
 
     <h3>5. Nota de prioridade de mobilização</h3>
@@ -162,6 +165,11 @@ function textoMetodologia(meta, completo = true) {
         25 km/h. Supõe que dá para chegar pelo rio.</li>
       <li><b>Por ar (helicóptero):</b> sai de Manaus em linha reta a 180 km/h, mais 30 minutos para decolar.</li>
     </ul>
+    <p>Para apoio aéreo e fluvial, cada evento mostra também a <b>pista de pouso</b> e o <b>porto</b> mais próximos,
+      do cadastro do <b>DNIT</b> (DNITGeo/VGeo). O mapa tem três camadas do DNIT: <b>rodovias federais</b> do Sistema
+      Nacional de Viação (versão mais recente, coloridas pelo tipo de superfície; trechos só planejados ficam de fora),
+      <b>pistas de pouso</b> (com tamanho, tipo de piso e se são públicas ou privadas) e <b>portos</b>. A conta de
+      viagem por terra continua usando as estradas do OpenStreetMap, que incluem estradas estaduais e municipais.</p>
     <p>O painel sugere ir por terra quando dá, senão pelo rio, e de helicóptero quando a viagem de barco passa de 12
       horas. Os custos são de ida e volta e só do deslocamento. <b>São estimativas para planejar</b>: não usam rotas
       reais nem consideram cheia ou seca dos rios, condição das estradas, pistas de pouso ou onde as brigadas estão.</p>
@@ -191,8 +199,10 @@ function textoMetodologia(meta, completo = true) {
 
     <h3>8. Atualização e limites</h3>
     <ul>
-      <li>Os dados são baixados e processados todo dia às 07:00 (Brasília). A data da última atualização aparece no
-        topo da página.</li>
+      <li>Os dados são baixados e processados duas vezes por dia (Brasília). Às <b>07:00</b> o dia anterior já está
+        completo. Às <b>21:00</b> entra a passagem da tarde do satélite oficial do INPE, então o número oficial do dia
+        aparece no mesmo dia. Entre uma atualização e outra, o dia de hoje fica incompleto. A data da última
+        atualização aparece no topo da página.</li>
       <li>Nuvens, fumaça e o horário das passagens dos satélites fazem com que nem todo fogo seja visto.</li>
       <li>Focos perto de limites (de município, TI, UC ou imóvel) podem cair do lado errado por causa da incerteza da
         posição.</li>

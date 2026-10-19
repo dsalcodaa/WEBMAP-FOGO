@@ -124,3 +124,4 @@ td { padding: 3px 4px; border-bottom: 1px solid var(--borda); vertical-align: to
   a { color: inherit; text-decoration: none; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+td.coord { font-family: ui-monospace, monospace; font-size: 9px; white-space: nowrap; }

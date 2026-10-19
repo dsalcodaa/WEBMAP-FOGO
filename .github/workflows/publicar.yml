@@ -2,7 +2,8 @@ name: Atualizar dados e publicar
 
 on:
   schedule:
-    - cron: "0 10 * * *"   # todo dia, 07:00 em Brasília
+    - cron: "0 10 * * *"   # todo dia, 07:00 em Brasília: fecha o dia anterior
+    - cron: "0 0 * * *"    # todo dia, 21:00 em Brasília: pega a passagem da tarde do satélite de referência
   workflow_dispatch:
   push:
     branches: [main]

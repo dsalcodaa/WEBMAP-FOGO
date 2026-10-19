@@ -3,7 +3,13 @@
 const PRODUTO = 'NEX – Hub de Análises Estratégicas';
 const CORES_CAT = ['#f2994a', '#3fbf7f', '#e5c547', '#8c96a3'];
 const CORES_CLASSE = { 'Crítica': '#ff3b3b', 'Alta': '#ff8a2c', 'Moderada': '#e5c547', 'Baixa': '#8c96a3' };
-const STATUS_CAR = { AT: 'Ativo', PE: 'Pendente', SU: 'Suspenso', CA: 'Cancelado' };
+// superfície das rodovias federais (texto igual ao gerado em pipeline/fontes.py)
+const CORES_RODOVIA = {
+  'Pavimentada (duplicada)': '#ffffff', 'Pavimentada': '#d9d9d9', 'Em obras de duplicação': '#bdbdbd',
+  'Em obras de pavimentação': '#e5c547', 'Implantada (leito natural)': '#c08a4a', 'Em obras de implantação': '#a0703a',
+  'Travessia (balsa)': '#4aa3ff',
+};
+const STATUS_CAR ={ AT: 'Ativo', PE: 'Pendente', SU: 'Suspenso', CA: 'Cancelado' };
 const TIPO_CAR = { IRU: 'Imóvel rural', AST: 'Assentamento', PCT: 'Povos e comunidades tradicionais' };
 const DIA_MS = 86400000;
 
@@ -54,6 +60,10 @@ const fmt1 = n => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 const fmtHa = n => `${fmt(n || 0)} ha`;
 const fmtR$ = n => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const fmtH = h => h < 1 ? `${Math.round(h * 60)} min` : `${Math.floor(h)} h ${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
+// coordenadas em graus decimais (SIRGAS 2000), com link para abrir o ponto num mapa de celular
+const fmtCoord = p => p?.lat == null ? '' : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+const linkCoord = p => p?.lat == null ? '–'
+  : `<a href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" rel="noopener">${fmtCoord(p)}</a>`;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 async function carregarDados(base = 'data/') {
@@ -62,10 +72,12 @@ async function carregarDados(base = 'data/') {
   const [F, meta, car, uc, ti, eventos, mun, sedes] = await Promise.all(
     nomes.map(n => fetch(base + n).then(r => { if (!r.ok) throw new Error(n); return r.json(); })));
   // qualidade do ar é opcional: sem o arquivo, o resto do painel funciona
-  const ar = await fetch(base + 'ar.json').then(r => r.ok ? r.json() : null).catch(() => null);
+  const opcional = n => fetch(base + n).then(r => r.ok ? r.json() : null).catch(() => null);
+  const [ar, dnit] = await Promise.all([opcional('ar.json'), opcional('dnit.geojson')]);
   prepararFocos(F);
   const D = {
     F, meta, car, uc, ti, eventos, mun, sedes, ar: ar?.municipios?.length ? ar : null,
+    dnit: dnit?.features?.length ? dnit : null,
     idx: { car: indexar(car), uc: indexar(uc), ti: indexar(ti), mun: indexar(mun) },
     base, anos: { [F.ano]: { F, car } },
   };

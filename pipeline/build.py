@@ -87,6 +87,12 @@ def qualidade_ar(sedes: gpd.GeoDataFrame, mun_idx: dict, uf: gpd.GeoDataFrame) -
     return {"hora": hora, "municipios": municipios, "estacoes": fontes.ar_estacoes(uf)}
 
 
+def com_coordenadas(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Ponto de referência (sempre dentro do polígono), em graus decimais SIRGAS 2000, para localizar em campo."""
+    p = gdf.geometry.representative_point()
+    return gdf.assign(lat=p.y.round(5), lon=p.x.round(5))
+
+
 def cruzar(focos: gpd.GeoDataFrame, car, uc, ti):
     """Imóvel CAR, UC e TI de cada foco, e a categoria pela ordem de precedência TI > UC > CAR > sem cadastro."""
     focos["car_i"] = poligono_mais_especifico(focos, car, "_i")
@@ -148,6 +154,12 @@ def main():
     car = car[car.status_imovel != "CA"].reset_index(drop=True)
     print("5/9 rodovias (OpenStreetMap)")
     vias = fontes.vias_osm(cache / f"vias_{fontes.UF.lower()}.parquet")
+    try:  # complemento: sem o DNIT o site sai, só sem essas camadas
+        dnit = fontes.dnit(uf)
+        print(f"  DNIT: {dnit.tipo.value_counts().to_dict()}")
+    except Exception as e:  # noqa: BLE001
+        print("  DNIT ignorado:", e)
+        dnit = gpd.GeoDataFrame({"tipo": [], "nome": [], "detalhe": []}, geometry=[], crs=fontes.CRS)
     print("6/9 eventos de fogo e prioridades (SIPAM)")
     eventos = fontes.eventos_sipam().reset_index(drop=True)
     eventos["indice_sipam"] = eventos.id_evento.map(fontes.prioridades_sipam(eventos.id_evento.tolist()))
@@ -208,6 +220,16 @@ def main():
     eventos["d_manaus_km"] = (pts.distance(manaus) / 1000).round(1)
     via = gpd.sjoin_nearest(pts, vias[["geometry"]].to_crs(CRS_METRICO), distance_col="d").drop_duplicates("id_evento")
     eventos["d_via_km"] = eventos.id_evento.map(via.set_index("id_evento")["d"] / 1000).round(1)
+    # pista de pouso e porto mais próximos (DNIT), para planejar apoio aéreo e fluvial
+    for tipo in ("pista", "porto"):
+        alvo = dnit[dnit.tipo == tipo]
+        if alvo.empty:
+            eventos[tipo], eventos[f"d_{tipo}_km"] = None, None
+            continue
+        p = gpd.sjoin_nearest(pts, alvo[["nome", "geometry"]].to_crs(CRS_METRICO), distance_col="d") \
+            .drop_duplicates("id_evento").set_index("id_evento")
+        eventos[tipo] = eventos.id_evento.map(p["nome"])
+        eventos[f"d_{tipo}_km"] = eventos.id_evento.map(p["d"] / 1000).round(1)
 
     # índice de prioridade de mobilização (0-100)
     comp = {
@@ -228,9 +250,9 @@ def main():
         out["area_evento_ha"] = out.area_evento_ha.fillna(0).round(1)
         out["n_eventos"] = out.n_eventos.fillna(0).astype(int)
         out["area_ha"] = (out._area / 1e4).round(1)
-        out = out.rename(columns={"_i": "i", "cod_imovel": "cod", "status_imovel": "status"})
+        out = com_coordenadas(out.rename(columns={"_i": "i", "cod_imovel": "cod", "status_imovel": "status"}))
         escrever_geojson(out[["i", "cod", "status", "condicao", "tipo_imovel", "municipio", "area_ha",
-                              "area_evento_ha", "n_eventos", "geometry"]], caminho, tolerancia)
+                              "area_evento_ha", "n_eventos", "lat", "lon", "geometry"]], caminho, tolerancia)
         return len(out)
 
     n_car_com_fogo = escrever_car(set(focos.loc[focos.car_i >= 0, "car_i"]) | set(queimada_por_car.index),
@@ -238,15 +260,19 @@ def main():
 
     uc["area_ha"] = (uc._area / 1e4).round(0)
     escrever_geojson(
-        uc.rename(columns={"_i": "i", "nome_uc": "nome"})[
-            ["i", "nome", "categoria", "grupo", "esfera", "org_gestor", "area_ha", "geometry"]],
+        com_coordenadas(uc.rename(columns={"_i": "i", "nome_uc": "nome"}))[
+            ["i", "nome", "categoria", "grupo", "esfera", "org_gestor", "area_ha", "lat", "lon", "geometry"]],
         saida / "uc.geojson", tolerancia=0.001)
 
     ti["area_ha"] = (ti._area / 1e4).round(0)
     escrever_geojson(
-        ti.rename(columns={"_i": "i", "terrai_nome": "nome", "etnia_nome": "etnia", "fase_ti": "fase"})[
-            ["i", "nome", "etnia", "fase", "modalidade_ti", "area_ha", "geometry"]],
+        com_coordenadas(ti.rename(columns={"_i": "i", "terrai_nome": "nome", "etnia_nome": "etnia", "fase_ti": "fase"}))[
+            ["i", "nome", "etnia", "fase", "modalidade_ti", "area_ha", "lat", "lon", "geometry"]],
         saida / "ti.geojson", tolerancia=0.001)
+    if dnit.empty:
+        (saida / "dnit.geojson").write_text('{"type":"FeatureCollection","features":[]}')
+    else:
+        escrever_geojson(dnit, saida / "dnit.geojson", tolerancia=0.0005)
 
     escrever_geojson(mun[["i", "cod_ibge", "nome", "geometry"]], saida / "municipios.geojson", tolerancia=0.002)
     escrever_geojson(sedes, saida / "sedes.geojson", tolerancia=0)
@@ -326,6 +352,7 @@ def main():
             "municipios": "IBGE – Malhas territoriais; sedes: compilação aberta kelvins/municipios-brasileiros",
             "vias": "OpenStreetMap – rodovias principais (Overpass API)",
             "ar": "Copernicus CAMS via Open-Meteo (modelo de PM2.5 e PM10); estações da rede AQICN/WAQI",
+            "dnit": "DNIT – DNITGeo/VGeo (rodovias federais do SNV, pistas de pouso e portos)",
         },
     }
     (saida / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

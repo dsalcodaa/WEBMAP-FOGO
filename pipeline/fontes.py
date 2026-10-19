@@ -31,6 +31,7 @@ IBGE_MUNICIPIOS = "https://servicodados.ibge.gov.br/api/v1/localidades/estados/{
 # coordenadas das sedes municipais (compilação aberta baseada no IBGE; a API do IBGE não traz coordenadas)
 SEDES_CSV = "https://raw.githubusercontent.com/kelvins/municipios-brasileiros/main/csv/municipios.csv"
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+DNIT_WFS = "https://servicos.dnit.gov.br/dnitgeo/geoserver/ows"  # o mesmo servidor do visualizador VGeo
 
 
 class _LegacyTLS(HTTPAdapter):
@@ -100,8 +101,13 @@ def focos_inpe_historico(ano: int, cache: Path) -> gpd.GeoDataFrame:
         df = pd.read_parquet(arq)
     else:
         print(f"  INPE anual {ano}")
-        z = zipfile.ZipFile(io.BytesIO(get(f"{INPE_BASE}/anual/Brasil_todos_sats/focos_br_todos-sats_{ano}.zip",
-                                           timeout=900).content))
+        try:
+            r = get(f"{INPE_BASE}/anual/Brasil_todos_sats/focos_br_todos-sats_{ano}.zip", tentativas=2, timeout=900)
+        except requests.HTTPError:
+            # o arquivo anual sai meses depois da virada do ano; até lá, usa os mensais (sem cache)
+            print(f"  anual {ano} indisponível, usando os arquivos mensais")
+            return focos_inpe(ano)
+        z = zipfile.ZipFile(io.BytesIO(r.content))
         df = pd.read_csv(z.open(z.namelist()[0]), dtype=str,
                          usecols=["latitude", "longitude", "data_pas", "satelite", "estado", "frp"])
         df = df[df.estado.str.strip().str.upper() == UF_NOME].drop(columns="estado")
@@ -208,6 +214,58 @@ def sedes_municipais() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
         {"cod_ibge": df.codigo_ibge, "nome": df.nome, "capital": df.capital == 1},
         geometry=gpd.points_from_xy(df.longitude, df.latitude), crs=CRS).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------- DNIT (VGeo)
+
+# superfície das rodovias federais no SNV; PLA (planejada) não existe no terreno e fica de fora
+SUPERFICIE_SNV = {"DUP": "Pavimentada (duplicada)", "PAV": "Pavimentada", "EOD": "Em obras de duplicação",
+                  "EOP": "Em obras de pavimentação", "IMP": "Implantada (leito natural)",
+                  "EOI": "Em obras de implantação", "TRV": "Travessia (balsa)"}
+
+
+def _dnit_params(camada, filtro, **extra):
+    return {"service": "WFS", "version": "2.0.0", "request": "GetFeature", "typeNames": f"vgeo:{camada}",
+            "outputFormat": "application/json", "srsName": "EPSG:4326", "CQL_FILTER": filtro, **extra}
+
+
+def _dnit(camada: str, filtro: str) -> gpd.GeoDataFrame:
+    feats = get(DNIT_WFS, params=_dnit_params(camada, filtro)).json()["features"]
+    return gpd.GeoDataFrame.from_features(feats, crs="EPSG:4326").to_crs(CRS)
+
+
+def dnit(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Rodovias federais (SNV, versão mais recente), pistas de pouso e portos do DNIT, recortados para a UF."""
+    # o SNV guarda todas as versões desde 2013; busca só o campo da versão para achar a mais recente
+    feats = get(DNIT_WFS, params=_dnit_params("vw_snv_rod", f"Unidade_Federacao='{UF}'",
+                                             propertyName="Versao_SNV")).json()["features"]
+    versao = max(f["properties"]["Versao_SNV"] for f in feats)
+    rod = _dnit("vw_snv_rod", f"Unidade_Federacao='{UF}' AND Versao_SNV='{versao}'")
+    rod = rod[rod.Superficie_Federal.isin(SUPERFICIE_SNV)]
+    rod = gpd.GeoDataFrame({
+        "tipo": "rodovia", "nome": "BR-" + rod.Codigo_BR.astype(str),
+        "detalhe": rod.Superficie_Federal.map(SUPERFICIE_SNV),
+        "trecho": rod.Local_Inicio.fillna("") + " → " + rod.Local_Fim.fillna(""),
+        "snv": rod.Codigo_SNV, "versao": rod.Versao_SNV,
+    }, geometry=rod.geometry.values, crs=CRS)
+
+    pis = _dnit("vw_aerodromos", f"Unidade_Federacao='{UF}'")
+    pis = gpd.GeoDataFrame({
+        "tipo": "pista", "nome": pis.Nome.fillna(pis.Codigo_ICAO),
+        "detalhe": pis.Municipio.fillna("") + " · " + pis.Extensao_m.fillna(0).astype(int).astype(str) + " m de "
+                   + pis.Pavimento.fillna("pavimento não informado") + " · "
+                   + pis.Uso.map({"PUB": "pública", "PRIV": "privada"}).fillna("uso não informado"),
+        "codigo": pis.Codigo_ICAO,
+    }, geometry=pis.geometry.representative_point().values, crs=CRS)
+
+    por = _dnit("vw_portos", f"Unidade_Federacao='{UF}'")
+    por = gpd.GeoDataFrame({
+        "tipo": "porto", "nome": por.Nome,
+        "detalhe": por.Classe.fillna("") + " · " + por.Acesso_Fluvial.fillna(por.Hidrovia.fillna("")),
+    }, geometry=por.geometry.representative_point().values, crs=CRS)
+
+    tudo = pd.concat([rod, pis, por], ignore_index=True)
+    return gpd.GeoDataFrame(tudo[tudo.intersects(uf.union_all())], crs=CRS)
 
 
 # ---------------------------------------------------------------- qualidade do ar

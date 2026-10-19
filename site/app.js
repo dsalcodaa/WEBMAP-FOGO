@@ -235,17 +235,17 @@ function tabelasFundiarias(a) {
   $('#t-car').innerHTML = '<tr><th>Imóvel</th><th>Município</th><th class="n">Focos</th></tr>' +
     maiores(a.porCar, 15).map(([i, n]) => {
       const p = D.idx.car.get(i)?.properties || {};
-      return `<tr data-zoom="car:${i}"><td><span class="cod">${esc(p.cod)}</span><br><small>${esc(TIPO_CAR[p.tipo_imovel] || p.tipo_imovel)} · ${esc(STATUS_CAR[p.status] || p.status)} · ${fmtHa(p.area_ha)}</small></td><td>${esc(p.municipio)}</td><td class="n">${fmt(n)}</td></tr>`;
+      return `<tr data-zoom="car:${i}"><td><span class="cod">${esc(p.cod)}</span><br><small>${esc(TIPO_CAR[p.tipo_imovel] || p.tipo_imovel)} · ${esc(STATUS_CAR[p.status] || p.status)} · ${fmtHa(p.area_ha)}<br>📍 ${fmtCoord(p)}</small></td><td>${esc(p.municipio)}</td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
   $('#t-uc').innerHTML = '<tr><th>Unidade de conservação</th><th class="n">Focos</th></tr>' +
     maiores(a.porUc, 10).map(([i, n]) => {
       const p = D.idx.uc.get(i)?.properties || {};
-      return `<tr data-zoom="uc:${i}"><td>${esc(p.nome)}<br><small>${esc(p.esfera)} · ${esc(p.grupo)}</small></td><td class="n">${fmt(n)}</td></tr>`;
+      return `<tr data-zoom="uc:${i}"><td>${esc(p.nome)}<br><small>${esc(p.esfera)} · ${esc(p.grupo)}<br>📍 ${fmtCoord(p)}</small></td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
   $('#t-ti').innerHTML = '<tr><th>Terra indígena</th><th class="n">Focos</th></tr>' +
     maiores(a.porTi, 10).map(([i, n]) => {
       const p = D.idx.ti.get(i)?.properties || {};
-      return `<tr data-zoom="ti:${i}"><td>${esc(p.nome)}<br><small>${esc(p.etnia)} · ${esc(p.fase)}</small></td><td class="n">${fmt(n)}</td></tr>`;
+      return `<tr data-zoom="ti:${i}"><td>${esc(p.nome)}<br><small>${esc(p.etnia)} · ${esc(p.fase)}<br>📍 ${fmtCoord(p)}</small></td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
 }
 
@@ -284,7 +284,9 @@ function tabelaMobilizacao(a, t) {
         `<td class="n">${fmtH(r.h)}</td><td class="n">${fmtR$(r.custo)}</td></tr>` +
         `<tr class="det" data-det="${p.id_evento}" hidden><td></td><td colspan="8"><ul class="modais">${det}</ul>` +
         `<p class="nota">Índice SIPAM: ${p.indice_sipam ?? 'sem índice'} · Sede mais próxima: ${esc(p.sede)} (${fmt1(p.d_sede_km)} km em linha reta) · ` +
-        `Manaus: ${fmt(p.d_manaus_km)} km · Área em imóveis CAR: ${fmtHa(p.area_car_ha)} (${p.n_car} imóveis) · Domínio: ${esc(p.dominio)}</p>` +
+        `Manaus: ${fmt(p.d_manaus_km)} km · Área em imóveis CAR: ${fmtHa(p.area_car_ha)} (${p.n_car} imóveis) · Domínio: ${esc(p.dominio)}` +
+        (p.pista ? ` · Pista de pouso mais próxima: ${esc(p.pista)} (${fmt1(p.d_pista_km)} km)` : '') +
+        (p.porto ? ` · Porto mais próximo: ${esc(p.porto)} (${fmt1(p.d_porto_km)} km)` : '') + '</p>' +
         `<button class="btn" data-ver-ev="${p.id_evento}">Ver no mapa</button></td></tr>`;
     }).join('');
 
@@ -413,6 +415,25 @@ function iniciarMapa() {
       paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': '#000', 'circle-stroke-width': 1 },
     });
 
+    // DNIT: rodovias abaixo dos eventos e focos; pistas e portos por cima. Começam desligados.
+    map.addSource('dnit', { type: 'geojson', data: D.dnit || { type: 'FeatureCollection', features: [] } });
+    const oculto = { visibility: 'none' };
+    map.addLayer({
+      id: 'dnit-rod', type: 'line', source: 'dnit', filter: ['==', ['get', 'tipo'], 'rodovia'], layout: oculto,
+      paint: {
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.5, 10, 4],
+        'line-color': ['match', ['get', 'detalhe'], ...Object.entries(CORES_RODOVIA).flat(), '#e5c547'],
+      },
+    }, 'eventos-fill');
+    map.addLayer({
+      id: 'dnit-pista', type: 'circle', source: 'dnit', filter: ['==', ['get', 'tipo'], 'pista'], layout: oculto,
+      paint: { 'circle-radius': 5.5, 'circle-color': '#00e5ff', 'circle-stroke-color': '#000', 'circle-stroke-width': 1.5 },
+    });
+    map.addLayer({
+      id: 'dnit-porto', type: 'circle', source: 'dnit', filter: ['==', ['get', 'tipo'], 'porto'], layout: oculto,
+      paint: { 'circle-radius': 5.5, 'circle-color': '#3d6bff', 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
+    });
+
     criarMarcadoresAr();
     const longe = () => map.getContainer().classList.toggle('ar-longe', map.getZoom() < 6.5);
     map.on('zoom', longe);
@@ -427,8 +448,11 @@ function iniciarMapa() {
   const grupos = {
     focos: ['focos-heat', 'focos-pt'], eventos: ['eventos-fill', 'eventos-line'], car: ['car-fill', 'car-line'],
     uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'],
+    rodovias: ['dnit-rod'], pistas: ['dnit-pista'], portos: ['dnit-porto'],
   };
   if (!D.ar) document.querySelector('[data-camada="ar"]').closest('label').hidden = true;
+  if (!D.dnit) document.querySelectorAll('.camadas .dnit').forEach(l => { l.hidden = true; });
+  if (innerWidth < 700) $('#legenda-caixa').open = false;
   document.querySelectorAll('[data-camada]').forEach(cb => cb.onchange = () => {
     if (cb.dataset.camada === 'ar') {
       // o maplibre troca o aria-label por "Map marker" ao adicionar; devolve o texto da etiqueta
@@ -450,7 +474,11 @@ function iniciarMapa() {
     `<span><span class="bolinha quadrada" style="background:${cor}"></span> ${c}</span>`).join('') +
     '<span><span class="bolinha" style="background:#fff;border:1px solid #000"></span> Sede municipal</span>' +
     (D.ar ? '<b>Qualidade do ar (24 h)</b><small>número = PM2,5 em µg/m³</small>' + CLASSES_AR.map(c =>
-      `<span><span class="bolinha" style="background:${c.cor}"></span> ${c.nome}</span>`).join('') : '');
+      `<span><span class="bolinha" style="background:${c.cor}"></span> ${c.nome}</span>`).join('') : '') +
+    (D.dnit ? '<b>DNIT</b>' + Object.entries(CORES_RODOVIA).map(([nome, cor]) =>
+      `<span><span class="traco" style="background:${cor}"></span> ${nome}</span>`).join('') +
+      '<span><span class="bolinha" style="background:#00e5ff;border:1px solid #000"></span> Pista de pouso</span>' +
+      '<span><span class="bolinha" style="background:#3d6bff;border:1px solid #fff"></span> Porto</span>' : '');
 }
 
 // qualidade do ar como etiquetas HTML com o nome da classe, para ler o status sem depender só da cor
@@ -495,7 +523,7 @@ function popups() {
   const nFocos = (src, id) => map.getFeatureState({ source: src, id })?.n || 0;
 
   // a ordem importa: o clique mostra só a camada mais específica sob o cursor
-  const ordem = ['focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
+  const ordem = ['dnit-pista', 'dnit-porto', 'focos-pt', 'sedes', 'dnit-rod', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
   map.on('click', e => {
     const visiveis = ordem.filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
     const [f] = map.queryRenderedFeatures(e.point, { layers: visiveis });
@@ -517,6 +545,18 @@ function popups() {
       case 'sedes':
         popup(e, `<h3>${esc(p.nome)}</h3><p>Sede municipal</p>`);
         break;
+      case 'dnit-rod':
+        popup(e, `<h3>${esc(p.nome)}</h3><p>${esc(p.detalhe)}</p>` + dl([['Trecho', p.trecho], ['Código SNV', p.snv],
+          ['Fonte', `DNIT – Sistema Nacional de Viação (versão ${p.versao})`]]));
+        break;
+      case 'dnit-pista':
+        popup(e, `<h3>✈ ${esc(p.nome)}</h3><p>Pista de pouso</p>` + dl([['Detalhes', p.detalhe], ['Código', p.codigo],
+          ['Fonte', 'DNIT (cadastro de aeródromos)']]) +
+          `<p>📍 ${linkCoord({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] })}</p>`);
+        break;
+      case 'dnit-porto':
+        popup(e, `<h3>⚓ ${esc(p.nome)}</h3><p>Porto</p>` + dl([['Detalhes', p.detalhe], ['Fonte', 'DNIT']]));
+        break;
       case 'eventos-fill': {
         const L = logistica(p, P), r = L[L.recomendado];
         popup(e, `<h3>Evento de fogo #${p.id_evento}</h3>${badgeClasse(p.classe)} prioridade <b>${fmt(p.prioridade)}</b>/100` + dl([
@@ -528,6 +568,8 @@ function popups() {
           ['TI', p.terra_indigena], ['UC', p.unidade_conservacao], ['Assentamento', p.projeto_assentamento],
           ['Deslocamento sugerido', `${MODAIS[L.recomendado]}: ${fmtH(r.h)}, ~${fmtR$(r.custo)}`],
           ['Sede mais próxima', `${p.sede} (${fmt1(p.d_sede_km)} km)`],
+          ['Pista de pouso mais próxima', p.pista ? `${p.pista} (${fmt1(p.d_pista_km)} km)` : null],
+          ['Porto mais próximo', p.porto ? `${p.porto} (${fmt1(p.d_porto_km)} km)` : null],
         ]));
         break;
       }
@@ -536,16 +578,18 @@ function popups() {
           ['Tipo', TIPO_CAR[p.tipo_imovel] || p.tipo_imovel], ['Status', STATUS_CAR[p.status] || p.status],
           ['Condição', p.condicao], ['Município', p.municipio], ['Área', fmtHa(p.area_ha)],
           ['Focos no filtro', nFocos('car', p.i)], ['Eventos SIPAM', p.n_eventos], ['Área em evento SIPAM', fmtHa(p.area_evento_ha)],
-        ]) + '<p><a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">Consulta pública do CAR</a></p>');
+        ]) + `<p>📍 Coordenadas: ${linkCoord(p)}</p>` +
+          '<p><a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">Consulta pública do CAR</a></p>');
         break;
       case 'ti-fill':
         popup(e, `<h3>TI ${esc(p.nome)}</h3>` + dl([
-          ['Etnia', p.etnia], ['Fase', p.fase], ['Área', fmtHa(p.area_ha)], ['Focos no filtro', nFocos('ti', p.i)]]));
+          ['Etnia', p.etnia], ['Fase', p.fase], ['Área', fmtHa(p.area_ha)], ['Focos no filtro', nFocos('ti', p.i)]]) +
+          `<p>📍 Coordenadas: ${linkCoord(p)}</p>`);
         break;
       case 'uc-fill':
         popup(e, `<h3>${esc(p.nome)}</h3>` + dl([
           ['Categoria', p.categoria], ['Esfera', p.esfera], ['Gestor', p.org_gestor], ['Área', fmtHa(p.area_ha)],
-          ['Focos no filtro', nFocos('uc', p.i)]]));
+          ['Focos no filtro', nFocos('uc', p.i)]]) + `<p>📍 Coordenadas: ${linkCoord(p)}</p>`);
         break;
       case 'mun-fill':
         popup(e, `<h3>${esc(p.nome)}</h3>` + dl([['Focos no filtro', nFocos('mun', p.i)]]));

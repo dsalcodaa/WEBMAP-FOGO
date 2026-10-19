@@ -152,16 +152,18 @@ carregarDados().then(async D => {
         `<td class="n">${fmtR$(r.custo)}</td></tr>`;
     }));
 
-  tabela('#t-car', ['Código do imóvel', 'Tipo / status', 'Município', '#Área (ha)', '#Focos'],
+  tabela('#t-car', ['Código do imóvel', 'Tipo / status', 'Município', 'Coordenadas', '#Área (ha)', '#Focos'],
     maiores(a.porCar, 15).map(([i, n]) => {
       const p = D.idx.car.get(i)?.properties || {};
       return `<tr><td class="cod">${esc(p.cod)}</td><td>${esc(TIPO_CAR[p.tipo_imovel] || p.tipo_imovel)} · ${esc(STATUS_CAR[p.status] || p.status)}</td>` +
-        `<td>${esc(p.municipio)}</td><td class="n">${fmt(p.area_ha)}</td><td class="n">${fmt(n)}</td></tr>`;
+        `<td>${esc(p.municipio)}</td><td class="coord">${fmtCoord(p)}</td><td class="n">${fmt(p.area_ha)}</td><td class="n">${fmt(n)}</td></tr>`;
     }));
-  tabela('#t-uc', ['Unidade', '#Focos'], maiores(a.porUc, 10).map(([i, n]) =>
-    `<tr><td>${esc(D.idx.uc.get(i)?.properties.nome)}</td><td class="n">${fmt(n)}</td></tr>`));
-  tabela('#t-ti', ['Terra indígena', '#Focos'], maiores(a.porTi, 10).map(([i, n]) =>
-    `<tr><td>${esc(D.idx.ti.get(i)?.properties.nome)}</td><td class="n">${fmt(n)}</td></tr>`));
+  const linhaArea = (idx, i, n) => {
+    const p = idx.get(i)?.properties || {};
+    return `<tr><td>${esc(p.nome)}</td><td class="coord">${fmtCoord(p)}</td><td class="n">${fmt(n)}</td></tr>`;
+  };
+  tabela('#t-uc', ['Unidade', 'Coordenadas', '#Focos'], maiores(a.porUc, 10).map(([i, n]) => linhaArea(D.idx.uc, i, n)));
+  tabela('#t-ti', ['Terra indígena', 'Coordenadas', '#Focos'], maiores(a.porTi, 10).map(([i, n]) => linhaArea(D.idx.ti, i, n)));
 
   $('#metodologia').insertAdjacentHTML('beforeend', textoMetodologia(D.meta, false) +
     `<h3>Fontes</h3><p>${Object.values(D.meta.fontes).map(esc).join('; ')}.</p>`);

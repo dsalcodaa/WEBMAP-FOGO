@@ -134,13 +134,19 @@
           <label><input type="checkbox" data-camada="ti" checked> Terras indígenas</label>
           <label><input type="checkbox" data-camada="sedes" checked> Sedes municipais</label>
           <label><input type="checkbox" data-camada="ar"> Qualidade do ar</label>
+          <label class="dnit"><input type="checkbox" data-camada="rodovias"> Rodovias federais (DNIT)</label>
+          <label class="dnit"><input type="checkbox" data-camada="pistas"> Pistas de pouso (DNIT)</label>
+          <label class="dnit"><input type="checkbox" data-camada="portos"> Portos (DNIT)</label>
           <label><input type="checkbox" data-camada="mun"> Focos por município</label>
           <div class="base">
             <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
             <label><input type="radio" name="base" value="satelite"> Satélite</label>
           </div>
         </div>
-        <div class="legenda" id="legenda"></div>
+        <details class="legenda" id="legenda-caixa" open>
+          <summary>Legenda</summary>
+          <div id="legenda"></div>
+        </details>
         <div class="carregando" id="carregando" hidden>Carregando focos no mapa…</div>
       </div>
     </section>
