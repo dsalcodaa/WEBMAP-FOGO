@@ -275,3 +275,19 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
   .camadas { font-size: 11px; max-width: 46%; }
   .legenda { display: none; }
 }
+
+/* qualidade do ar no mapa: etiqueta com o nome da classe e uma ponta apontando para a cidade */
+.ar-marca {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 3px 7px; border: 1px solid rgba(0, 0, 0, .55); border-radius: 6px;
+  background: var(--cor); font: 600 11px/1.15 system-ui, sans-serif; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .5); margin-bottom: 6px; white-space: nowrap; /* position vem do maplibre */
+}
+.ar-marca::after {
+  content: ''; position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent; border-bottom: 0; border-top-color: var(--cor);
+}
+.ar-marca b { font-size: 11px; text-transform: uppercase; letter-spacing: .02em; }
+.ar-marca span { font-weight: 500; font-size: 10px; }
+.ar-marca:hover, .ar-marca:focus-visible { z-index: 5; outline: 2px solid #fff; }
+.ar-longe .ar-marca span { display: none; }

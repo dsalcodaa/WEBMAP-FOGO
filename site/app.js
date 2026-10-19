@@ -365,29 +365,10 @@ function iniciarMapa() {
       paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': '#000', 'circle-stroke-width': 1 },
     });
 
-    const pontos = (lista, props) => ({
-      type: 'FeatureCollection',
-      features: lista.map(r => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [r.lon, r.lat] }, properties: props(r) })),
-    });
-    map.addSource('ar', { type: 'geojson', data: pontos(D.ar?.municipios || [], r => r) });
-    map.addSource('ar-est', { type: 'geojson', data: pontos(D.ar?.estacoes || [], r => r) });
-    const oculto = { visibility: 'none' };
-    map.addLayer({
-      id: 'ar', type: 'circle', source: 'ar', layout: oculto,
-      paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 7, 9, 14],
-        'circle-color': ['match', ['get', 'classe'], ...CLASSES_AR.flatMap((c, i) => [i, c.cor]), '#888'],
-        'circle-opacity': 0.85, 'circle-stroke-color': '#000', 'circle-stroke-width': 1,
-      },
-    });
-    map.addLayer({
-      id: 'ar-est', type: 'circle', source: 'ar-est', layout: oculto,
-      paint: {
-        'circle-radius': 6, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
-        'circle-color': ['step', ['get', 'aqi'], CLASSES_AR[0].cor, 51, CLASSES_AR[1].cor, 101, CLASSES_AR[2].cor,
-          201, CLASSES_AR[3].cor, 301, CLASSES_AR[4].cor],
-      },
-    });
+    criarMarcadoresAr();
+    const longe = () => map.getContainer().classList.toggle('ar-longe', map.getZoom() < 6.5);
+    map.on('zoom', longe);
+    longe();
 
     popups();
     mapaPronto = true;
@@ -397,11 +378,17 @@ function iniciarMapa() {
 
   const grupos = {
     focos: ['focos-heat', 'focos-pt'], eventos: ['eventos-fill', 'eventos-line'], car: ['car-fill', 'car-line'],
-    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'], ar: ['ar', 'ar-est'],
+    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'],
   };
   if (!D.ar) document.querySelector('[data-camada="ar"]').closest('label').hidden = true;
-  document.querySelectorAll('[data-camada]').forEach(cb => cb.onchange = () =>
-    grupos[cb.dataset.camada].forEach(id => map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none')));
+  document.querySelectorAll('[data-camada]').forEach(cb => cb.onchange = () => {
+    if (cb.dataset.camada === 'ar') {
+      // o maplibre troca o aria-label por "Map marker" ao adicionar; devolve o texto da etiqueta
+      return marcadoresAr.forEach(m => cb.checked
+        ? m.addTo(map).getElement().setAttribute('aria-label', m.getElement().dataset.rotulo) : m.remove());
+    }
+    grupos[cb.dataset.camada].forEach(id => map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none'));
+  });
   document.querySelectorAll('input[name=base]').forEach(r => r.onchange = () => {
     map.removeLayer('base');
     map.removeSource('base');
@@ -414,8 +401,43 @@ function iniciarMapa() {
     '<b>Eventos SIPAM por prioridade</b>' + Object.entries(CORES_CLASSE).map(([c, cor]) =>
     `<span><span class="bolinha quadrada" style="background:${cor}"></span> ${c}</span>`).join('') +
     '<span><span class="bolinha" style="background:#fff;border:1px solid #000"></span> Sede municipal</span>' +
-    (D.ar ? '<b>Qualidade do ar (24 h)</b>' + CLASSES_AR.map(c =>
+    (D.ar ? '<b>Qualidade do ar (24 h)</b><small>número = PM2,5 em µg/m³</small>' + CLASSES_AR.map(c =>
       `<span><span class="bolinha" style="background:${c.cor}"></span> ${c.nome}</span>`).join('') : '');
+}
+
+// qualidade do ar como etiquetas HTML com o nome da classe, para ler o status sem depender só da cor
+let marcadoresAr = [];
+
+function criarMarcadoresAr() {
+  const etiqueta = (cor, escura, titulo, linha, html) => {
+    const el = document.createElement('button');
+    el.className = 'ar-marca';
+    el.style.setProperty('--cor', cor);
+    el.style.color = escura ? '#fff' : '#111';
+    el.innerHTML = `<b>${titulo}</b><span>${linha}</span>`;
+    el.dataset.rotulo = `${el.querySelector('span').textContent}: ${el.querySelector('b').textContent}`;
+    return new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setPopup(new maplibregl.Popup({ maxWidth: '340px', offset: 28 }).setHTML(html));
+  };
+  const linha = (k, v) => v == null ? '' : `<dt>${k}</dt><dd>${v}</dd>`;
+  // piores por último, para ficarem por cima quando se sobrepõem
+  const sedes = [...(D.ar?.municipios || [])].sort((a, b) => a.pm25_24h - b.pm25_24h).map(r => {
+    const c = CLASSES_AR[r.classe];
+    return etiqueta(c.cor, r.classe >= 3, c.nome, `${esc(r.nome)} · ${fmt1(r.pm25_24h)}`,
+      `<h3>Qualidade do ar em ${esc(r.nome)}</h3>${badgeAr(r.classe)}<p>${c.saude}</p><dl>` +
+      linha('PM2,5 média 24 h', `${fmt1(r.pm25_24h)} µg/m³`) +
+      linha('PM2,5 agora', r.pm25_agora == null ? null : `${fmt1(r.pm25_agora)} µg/m³`) +
+      linha('PM10 média 24 h', `${fmt1(r.pm10_24h)} µg/m³`) +
+      linha('Fonte', 'Estimativa do modelo Copernicus/CAMS') + '</dl>').setLngLat([r.lon, r.lat]);
+  });
+  const estacoes = (D.ar?.estacoes || []).map(s => {
+    const i = s.aqi <= 50 ? 0 : s.aqi <= 100 ? 1 : s.aqi <= 200 ? 2 : s.aqi <= 300 ? 3 : 4;
+    return etiqueta(CLASSES_AR[i].cor, i >= 3, `📡 ${faixaAqi(s.aqi)}`, `${esc(s.nome)} · AQI ${s.aqi}`,
+      `<h3>${esc(s.nome)}</h3><p>Estação de medição (rede AQICN)</p><dl>` +
+      linha('Índice (escala americana AQI)', `${s.aqi} – ${faixaAqi(s.aqi)}`) + linha('Medição', esc(s.hora)) + '</dl>')
+      .setLngLat([s.lon, s.lat]);
+  });
+  marcadoresAr = [...sedes, ...estacoes];
 }
 
 function popups() {
@@ -425,7 +447,7 @@ function popups() {
   const nFocos = (src, id) => map.getFeatureState({ source: src, id })?.n || 0;
 
   // a ordem importa: o clique mostra só a camada mais específica sob o cursor
-  const ordem = ['ar-est', 'ar', 'focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
+  const ordem = ['focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
   map.on('click', e => {
     const visiveis = ordem.filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
     const [f] = map.queryRenderedFeatures(e.point, { layers: visiveis });
@@ -446,17 +468,6 @@ function popups() {
       }
       case 'sedes':
         popup(e, `<h3>${esc(p.nome)}</h3><p>Sede municipal</p>`);
-        break;
-      case 'ar':
-        popup(e, `<h3>Qualidade do ar em ${esc(p.nome)}</h3>${badgeAr(p.classe)}<p>${CLASSES_AR[p.classe].saude}</p>` + dl([
-          ['PM2,5 média 24 h', `${fmt1(p.pm25_24h)} µg/m³`], ['PM2,5 agora', p.pm25_agora == null ? null : `${fmt1(p.pm25_agora)} µg/m³`],
-          ['PM10 média 24 h', `${fmt1(p.pm10_24h)} µg/m³`], ['Fonte', 'Estimativa do modelo Copernicus/CAMS'],
-        ]));
-        break;
-      case 'ar-est':
-        popup(e, `<h3>${esc(p.nome)}</h3><p>Estação de medição (rede AQICN)</p>` + dl([
-          ['Índice (escala americana AQI)', `${p.aqi} – ${faixaAqi(p.aqi)}`], ['Medição', p.hora],
-        ]));
         break;
       case 'eventos-fill': {
         const L = logistica(p, P), r = L[L.recomendado];
