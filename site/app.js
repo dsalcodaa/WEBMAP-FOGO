@@ -62,6 +62,14 @@ function ajuda(tema) {
       .map(m => `<p><b>${m.nome}</b><br>${m.desc}</p>`).join('') +
       '<p>Veja a aba <b>Metodologia</b> para os detalhes.</p>';
   }
+  if (tema === 'ar') {
+    $('#dlg-texto').innerHTML = '<h3>Qualidade do ar</h3><p>A fumaça das queimadas solta partículas muito finas ' +
+      '(<b>PM2,5</b>, menores que um fio de cabelo) que entram fundo no pulmão. A classificação segue o índice do ' +
+      'Ministério do Meio Ambiente, pela média das últimas 24 horas:</p><ul>' +
+      CLASSES_AR.map(c => `<li>${badgeAr(CLASSES_AR.indexOf(c))} ${c.saude}</li>`).join('') +
+      '</ul><p>Os valores são <b>estimativas de um modelo</b> (Copernicus/CAMS) na sede de cada município, ' +
+      'não medições de estação. Veja a aba <b>Metodologia</b>.</p>';
+  }
   $('#dlg-ajuda').showModal();
 }
 
@@ -110,6 +118,12 @@ function kpis(a, t) {
     [fmt(ativos), 'eventos de fogo ativos', 'agora, segundo o SIPAM'],
     [fmt(criticos), 'eventos de prioridade crítica', '<a href="#mobilizacao" data-aba-link="mobilizacao">ver mobilização</a>'],
   ];
+  const ar = arDoFiltro(D, estado);
+  if (ar.length) {
+    itens.push(estado.mun >= 0
+      ? [CLASSES_AR[ar[0].classe].nome, 'qualidade do ar', `PM2,5: ${fmt1(ar[0].pm25_24h)} µg/m³ (24 h)`]
+      : [fmt(ar.filter(r => r.classe >= 2).length), 'cidades com ar ruim ou pior', 'média das últimas 24 h']);
+  }
   return itens.map(([v, r, s]) => `<div class="kpi"><b>${v}</b><span>${r}</span><small>${s}</small></div>`).join('');
 }
 
@@ -185,6 +199,15 @@ function tabelasFundiarias(a) {
       const p = D.idx.ti.get(i)?.properties || {};
       return `<tr data-zoom="ti:${i}"><td>${esc(p.nome)}<br><small>${esc(p.etnia)} · ${esc(p.fase)}</small></td><td class="n">${fmt(n)}</td></tr>`;
     }).join('');
+}
+
+function tabelaAr() {
+  if (!D.ar) return void ($('#cartao-ar').hidden = true);
+  const hora = D.ar.hora ? D.ar.hora.slice(11, 16) : '';
+  $('#nota-ar').innerHTML = `Média das últimas 24 h na sede de cada município, até ${hora} (horário de Manaus). ` +
+    'PM2,5 em µg/m³: é a fumaça fina que faz mal à saúde. Piores primeiro.';
+  $('#t-ar').innerHTML = `<tr>${CAB_AR.map(c => `<th class="${c.startsWith('#') ? 'n' : ''}">${c.replace(/^#/, '')}</th>`).join('')}</tr>` +
+    linhasAr(arDoFiltro(D, estado)).join('');
 }
 
 // ---------------------------------------------------------------- mobilização
@@ -342,6 +365,30 @@ function iniciarMapa() {
       paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': '#000', 'circle-stroke-width': 1 },
     });
 
+    const pontos = (lista, props) => ({
+      type: 'FeatureCollection',
+      features: lista.map(r => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [r.lon, r.lat] }, properties: props(r) })),
+    });
+    map.addSource('ar', { type: 'geojson', data: pontos(D.ar?.municipios || [], r => r) });
+    map.addSource('ar-est', { type: 'geojson', data: pontos(D.ar?.estacoes || [], r => r) });
+    const oculto = { visibility: 'none' };
+    map.addLayer({
+      id: 'ar', type: 'circle', source: 'ar', layout: oculto,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 7, 9, 14],
+        'circle-color': ['match', ['get', 'classe'], ...CLASSES_AR.flatMap((c, i) => [i, c.cor]), '#888'],
+        'circle-opacity': 0.85, 'circle-stroke-color': '#000', 'circle-stroke-width': 1,
+      },
+    });
+    map.addLayer({
+      id: 'ar-est', type: 'circle', source: 'ar-est', layout: oculto,
+      paint: {
+        'circle-radius': 6, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
+        'circle-color': ['step', ['get', 'aqi'], CLASSES_AR[0].cor, 51, CLASSES_AR[1].cor, 101, CLASSES_AR[2].cor,
+          201, CLASSES_AR[3].cor, 301, CLASSES_AR[4].cor],
+      },
+    });
+
     popups();
     mapaPronto = true;
     atualizar();
@@ -350,8 +397,9 @@ function iniciarMapa() {
 
   const grupos = {
     focos: ['focos-heat', 'focos-pt'], eventos: ['eventos-fill', 'eventos-line'], car: ['car-fill', 'car-line'],
-    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'],
+    uc: ['uc-fill', 'uc-line'], ti: ['ti-fill', 'ti-line'], mun: ['mun-fill'], sedes: ['sedes'], ar: ['ar', 'ar-est'],
   };
+  if (!D.ar) document.querySelector('[data-camada="ar"]').closest('label').hidden = true;
   document.querySelectorAll('[data-camada]').forEach(cb => cb.onchange = () =>
     grupos[cb.dataset.camada].forEach(id => map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none')));
   document.querySelectorAll('input[name=base]').forEach(r => r.onchange = () => {
@@ -365,7 +413,9 @@ function iniciarMapa() {
     `<span><span class="bolinha" style="background:${CORES_CAT[i]}"></span> ${c}</span>`).join('') +
     '<b>Eventos SIPAM por prioridade</b>' + Object.entries(CORES_CLASSE).map(([c, cor]) =>
     `<span><span class="bolinha quadrada" style="background:${cor}"></span> ${c}</span>`).join('') +
-    '<span><span class="bolinha" style="background:#fff;border:1px solid #000"></span> Sede municipal</span>';
+    '<span><span class="bolinha" style="background:#fff;border:1px solid #000"></span> Sede municipal</span>' +
+    (D.ar ? '<b>Qualidade do ar (24 h)</b>' + CLASSES_AR.map(c =>
+      `<span><span class="bolinha" style="background:${c.cor}"></span> ${c.nome}</span>`).join('') : '');
 }
 
 function popups() {
@@ -375,7 +425,7 @@ function popups() {
   const nFocos = (src, id) => map.getFeatureState({ source: src, id })?.n || 0;
 
   // a ordem importa: o clique mostra só a camada mais específica sob o cursor
-  const ordem = ['focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
+  const ordem = ['ar-est', 'ar', 'focos-pt', 'sedes', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
   map.on('click', e => {
     const visiveis = ordem.filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
     const [f] = map.queryRenderedFeatures(e.point, { layers: visiveis });
@@ -386,7 +436,8 @@ function popups() {
         const i = p.k;
         popup(e, '<h3>Foco de calor</h3>' + dl([
           ['Data', dataBR(D, F.dia[i])], ['Município', F.municipios[F.mun[i]]], ['Situação', F.categorias[F.cat[i]]],
-          ['Detecções no dia', `${F.n[i]} (${F.nref[i]} do satélite de referência)`], ['FRP máximo', `${F.frp[i]} MW`],
+          ['Vezes que os satélites viram calor aqui no dia', `${F.n[i]} (${F.nref[i]} pelo satélite oficial do INPE)`],
+          ['Força do fogo (FRP máximo)', `${F.frp[i]} MW`],
           ['Imóvel CAR', F.car[i] >= 0 ? D.idx.car.get(F.car[i])?.properties.cod : null],
           ['UC', F.uc[i] >= 0 ? D.idx.uc.get(F.uc[i])?.properties.nome : null],
           ['TI', F.ti[i] >= 0 ? D.idx.ti.get(F.ti[i])?.properties.nome : null],
@@ -395,6 +446,17 @@ function popups() {
       }
       case 'sedes':
         popup(e, `<h3>${esc(p.nome)}</h3><p>Sede municipal</p>`);
+        break;
+      case 'ar':
+        popup(e, `<h3>Qualidade do ar em ${esc(p.nome)}</h3>${badgeAr(p.classe)}<p>${CLASSES_AR[p.classe].saude}</p>` + dl([
+          ['PM2,5 média 24 h', `${fmt1(p.pm25_24h)} µg/m³`], ['PM2,5 agora', p.pm25_agora == null ? null : `${fmt1(p.pm25_agora)} µg/m³`],
+          ['PM10 média 24 h', `${fmt1(p.pm10_24h)} µg/m³`], ['Fonte', 'Estimativa do modelo Copernicus/CAMS'],
+        ]));
+        break;
+      case 'ar-est':
+        popup(e, `<h3>${esc(p.nome)}</h3><p>Estação de medição (rede AQICN)</p>` + dl([
+          ['Índice (escala americana AQI)', `${p.aqi} – ${faixaAqi(p.aqi)}`], ['Medição', p.hora],
+        ]));
         break;
       case 'eventos-fill': {
         const L = logistica(p, P), r = L[L.recomendado];
@@ -459,6 +521,7 @@ function atualizar() {
   graficosAtualizar(a);
   tabelaMunicipios(a, t);
   tabelasFundiarias(a);
+  tabelaAr();
   tabelaMobilizacao(a, t);
   lateralMapa(a, t);
   $('#rel-mun').title = estado.mun >= 0 ? `Relatório de ${D.F.municipios[estado.mun]}` : 'Escolha um município no filtro';
@@ -493,7 +556,7 @@ carregarDados().then(dados => {
   estado = estadoInicial(D, 30);
   const m = D.meta;
   $('#atualizado').innerHTML = `Atualizado em <b>${new Date(m.atualizado_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</b>`;
-  $('#rodape').innerHTML = `Um produto <b>${esc(PRODUTO)}</b> · Dados públicos: INPE, Censipam/SIPAM, SICAR, MMA, FUNAI, IBGE, OpenStreetMap · ` +
+  $('#rodape').innerHTML = `Um produto <b>${esc(PRODUTO)}</b> · Dados públicos: INPE, Censipam/SIPAM, SICAR, MMA, FUNAI, IBGE, OpenStreetMap, Copernicus/CAMS, AQICN · ` +
     'Atualização diária automática · <a href="#metodologia" data-aba-link="metodologia">Metodologia</a> · ' +
     '<a href="https://github.com/dsalcodaa/WEBMAP-FOGO" target="_blank" rel="noopener">Código aberto</a>';
   $('#aba-metodologia').innerHTML = textoMetodologia(m, true);

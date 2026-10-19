@@ -7,23 +7,39 @@ const STATUS_CAR = { AT: 'Ativo', PE: 'Pendente', SU: 'Suspenso', CA: 'Cancelado
 const TIPO_CAR = { IRU: 'Imóvel rural', AST: 'Assentamento', PCT: 'Povos e comunidades tradicionais' };
 const DIA_MS = 86400000;
 
+// a ordem define a ordem no seletor; o padrão é o número oficial do INPE
 const METODOS = {
-  unicos: {
-    nome: 'Focos únicos (recomendado)',
-    curto: 'focos únicos',
-    desc: 'Um foco por área de ~1 km² por dia, juntando todos os satélites. Evita contar o mesmo fogo várias vezes.',
-  },
   ref: {
-    nome: 'Satélite de referência do INPE',
-    curto: 'focos (satélite de referência)',
-    desc: 'Só as detecções do satélite AQUA (tarde), usado pelo INPE para comparar anos. Subestima, mas é comparável.',
+    nome: 'Número oficial do INPE (recomendado)',
+    curto: 'focos de calor (padrão INPE)',
+    desc: 'Conta só o satélite que o INPE usa nos números oficiais (AQUA, passagem da tarde). É o número que sai nas ' +
+      'notícias e nos boletins, e dá para comparar com anos anteriores. Como o satélite passa uma vez por dia, ' +
+      'alguns fogos ficam de fora.',
+  },
+  unicos: {
+    nome: 'Lugares com fogo por dia (todos os satélites)',
+    curto: 'lugares com fogo (todos os satélites)',
+    desc: 'Junta todos os satélites e conta cada quadradinho de ~1 km uma vez por dia. Mostra melhor onde houve fogo, ' +
+      'mas dá um número maior que o oficial e não deve ser comparado com ele.',
   },
   brutas: {
-    nome: 'Todas as detecções',
+    nome: 'Todas as detecções (uso técnico)',
     curto: 'detecções de satélite',
-    desc: 'Toda detecção de todos os satélites. O mesmo fogo aparece várias vezes ao dia; não use como número de incêndios.',
+    desc: 'Soma toda vez que algum satélite viu calor. O mesmo fogo é contado muitas vezes no mesmo dia. ' +
+      'Não use como número de focos nem de incêndios.',
   },
 };
+
+// Índice de Qualidade do Ar do MMA (faixas pela média de 24 h); a classe vem pronta do pipeline
+const CLASSES_AR = [
+  { nome: 'Boa', cor: '#3fbf7f', saude: 'Sem riscos à saúde.' },
+  { nome: 'Moderada', cor: '#e5c547', saude: 'Crianças, idosos e pessoas com doenças no pulmão ou no coração podem ter tosse seca e cansaço.' },
+  { nome: 'Ruim', cor: '#ff8a2c', saude: 'Todos podem sentir tosse seca, cansaço e ardor nos olhos, nariz e garganta. Grupos sensíveis podem ter efeitos mais sérios.' },
+  { nome: 'Muito ruim', cor: '#e5322d', saude: 'Os sintomas pioram e pode haver falta de ar e chiado no peito. Grupos sensíveis devem evitar sair de casa.' },
+  { nome: 'Péssima', cor: '#8f3fb5', saude: 'Risco sério de doenças respiratórias e do coração para toda a população. Evite atividades ao ar livre.' },
+];
+// escala americana (AQI) usada pelas estações AQICN
+const faixaAqi = v => v <= 50 ? 'Boa' : v <= 100 ? 'Moderada' : v <= 150 ? 'Ruim para sensíveis' : v <= 200 ? 'Ruim' : v <= 300 ? 'Muito ruim' : 'Perigosa';
 
 // premissas de deslocamento; editáveis na aba Mobilização
 const PARAMS_PADRAO = {
@@ -45,11 +61,13 @@ async function carregarDados(base = 'data/') {
     'municipios.geojson', 'sedes.geojson'];
   const [F, meta, car, uc, ti, eventos, mun, sedes] = await Promise.all(
     nomes.map(n => fetch(base + n).then(r => { if (!r.ok) throw new Error(n); return r.json(); })));
+  // qualidade do ar é opcional: sem o arquivo, o resto do painel funciona
+  const ar = await fetch(base + 'ar.json').then(r => r.ok ? r.json() : null).catch(() => null);
   F.n = F.lat.length;
   F.dia0 = Date.UTC(F.ano, 0, 1);
   const indexar = fc => new Map(fc.features.map(f => [f.properties.i, f]));
   return {
-    F, meta, car, uc, ti, eventos, mun, sedes,
+    F, meta, car, uc, ti, eventos, mun, sedes, ar: ar?.municipios?.length ? ar : null,
     idx: { car: indexar(car), uc: indexar(uc), ti: indexar(ti), mun: indexar(mun) },
   };
 }
@@ -60,7 +78,7 @@ function dataBR(D, d) { return diaParaData(D, d).split('-').reverse().join('/');
 
 function estadoInicial(D, dias = 30) {
   const ate = D.F.ultimo_dia;
-  return { de: Math.max(0, ate - dias + 1), ate, metodo: 'unicos', mun: -1, cats: new Set([0, 1, 2, 3]) };
+  return { de: Math.max(0, ate - dias + 1), ate, metodo: 'ref', mun: -1, cats: new Set([0, 1, 2, 3]) };
 }
 
 function pesoFoco(D, metodo) {
@@ -193,8 +211,42 @@ function resumoTexto(D, e, a, t) {
   s += `Nos últimos 7 dias completos, ${tend}. `;
   if (e.mun < 0 && top.length) s += `Os municípios mais afetados no período foram <b>${top.join('</b>, <b>')}</b>. `;
   s += `Hoje há <b>${ativos}</b> eventos de fogo ativos monitorados pelo SIPAM ${lugar}`;
-  s += urgentes ? `, dos quais <b>${urgentes}</b> com prioridade crítica de mobilização.` : '.';
-  return s;
+  s += urgentes ? `, dos quais <b>${urgentes}</b> com prioridade crítica de mobilização. ` : '. ';
+  return s + resumoAr(D, e);
+}
+
+// ---------------------------------------------------------------- qualidade do ar
+
+function arDoFiltro(D, e) {
+  if (!D.ar) return [];
+  return D.ar.municipios.filter(r => e.mun < 0 || r.mun === e.mun).sort((a, b) => b.pm25_24h - a.pm25_24h);
+}
+
+function badgeAr(c) {
+  const k = CLASSES_AR[c];
+  return `<span class="badge" style="background:${k.cor}">${k.nome}</span>`;
+}
+
+function resumoAr(D, e) {
+  const lista = arDoFiltro(D, e);
+  if (!lista.length) return '';
+  if (e.mun >= 0) {
+    const r = lista[0];
+    return `A qualidade do ar na cidade está <b>${CLASSES_AR[r.classe].nome.toLowerCase()}</b> (média das últimas 24 horas).`;
+  }
+  const ruins = lista.filter(r => r.classe >= 2);
+  if (!ruins.length) return 'A qualidade do ar está boa ou moderada em todas as sedes municipais.';
+  return `<b>${ruins.length}</b> ${ruins.length > 1 ? 'cidades estão' : 'cidade está'} com o ar ruim ou pior por causa da fumaça` +
+    `, com destaque para <b>${ruins.slice(0, 3).map(r => esc(r.nome)).join('</b>, <b>')}</b>.`;
+}
+
+// cabeçalho no formato de relatorio.js: '#' marca coluna numérica
+const CAB_AR = ['Cidade', 'Qualidade do ar', '#PM2,5 média 24 h', '#PM2,5 agora', 'O que pode acontecer'];
+
+function linhasAr(lista) {
+  return lista.map(r => `<tr><td><b>${esc(r.nome)}</b></td><td>${badgeAr(r.classe)}</td>` +
+    `<td class="n">${fmt1(r.pm25_24h)}</td><td class="n">${r.pm25_agora == null ? '–' : fmt1(r.pm25_agora)}</td>` +
+    `<td><small>${CLASSES_AR[r.classe].saude}</small></td></tr>`);
 }
 
 function bboxGeom(geom) {

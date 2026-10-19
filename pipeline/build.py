@@ -56,6 +56,35 @@ def focos_unicos(focos: gpd.GeoDataFrame, dia0: pd.Timestamp) -> gpd.GeoDataFram
     return gpd.GeoDataFrame(u, geometry=gpd.points_from_xy(u.lon, u.lat), crs=fontes.CRS)
 
 
+# limites da média de 24 h (µg/m³) entre as faixas Boa | Moderada | Ruim | Muito ruim | Péssima
+# do Índice de Qualidade do Ar do MMA (Guia Técnico, 2019; Resolução CONAMA 491/2018)
+FAIXAS_AR = {"pm25": [25, 50, 75, 125], "pm10": [50, 100, 150, 250]}
+
+
+def faixa_ar(valor, poluente):
+    return int(np.searchsorted(FAIXAS_AR[poluente], valor, side="left"))
+
+
+def qualidade_ar(sedes: gpd.GeoDataFrame, mun_idx: dict, uf: gpd.GeoDataFrame) -> dict:
+    """Média das últimas 24 h de PM2.5 e PM10 na sede de cada município (modelo CAMS) e estações AQICN."""
+    municipios, hora = [], None
+    for (_, s), r in zip(sedes.iterrows(), fontes.ar_modelo(sedes)):
+        hora = r["current"]["time"]
+        h = pd.DataFrame(r["hourly"])
+        agora = h.index[h.time == r["current"]["time"]][0]
+        ult = h.iloc[agora - 23: agora + 1]
+        pm25, pm10 = ult.pm2_5.mean(), ult.pm10.mean()
+        if pd.isna(pm25) or pd.isna(pm10):
+            continue
+        municipios.append({
+            "mun": mun_idx.get(s.cod_ibge, -1), "nome": s.nome, "lat": round(s.geometry.y, 4), "lon": round(s.geometry.x, 4),
+            "pm25_24h": round(float(pm25), 1), "pm10_24h": round(float(pm10), 1),
+            "pm25_agora": r["current"]["pm2_5"], "pm10_agora": r["current"]["pm10"],
+            "classe": max(faixa_ar(pm25, "pm25"), faixa_ar(pm10, "pm10")),
+        })
+    return {"hora": hora, "municipios": municipios, "estacoes": fontes.ar_estacoes(uf)}
+
+
 def percentil(s: pd.Series) -> pd.Series:
     r = s.rank(pct=True)
     return r.where(s > 0, 0).fillna(0)
@@ -212,6 +241,15 @@ def main():
     (saida / "focos.json").write_text(json.dumps(colunas, separators=(",", ":")))
     print(f"  focos.json: {len(focos)} focos únicos, {(saida / 'focos.json').stat().st_size / 1e6:.1f} MB")
 
+    # qualidade do ar é complemento: se a API falhar, o site sai sem ela em vez de não atualizar
+    try:
+        ar = qualidade_ar(sedes, mun_idx, uf)
+    except Exception as e:  # noqa: BLE001
+        print("  qualidade do ar ignorada:", e)
+        ar = {"hora": None, "municipios": [], "estacoes": []}
+    (saida / "ar.json").write_text(json.dumps(ar, ensure_ascii=False, separators=(",", ":")))
+    print(f"  ar.json: {len(ar['municipios'])} sedes, {len(ar['estacoes'])} estações")
+
     meta = {
         "atualizado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
         "uf": fontes.UF,
@@ -245,6 +283,7 @@ def main():
             "ti": "FUNAI – Terras Indígenas (geoserver.funai.gov.br)",
             "municipios": "IBGE – Malhas territoriais; sedes: compilação aberta kelvins/municipios-brasileiros",
             "vias": "OpenStreetMap – rodovias principais (Overpass API)",
+            "ar": "Copernicus CAMS via Open-Meteo (modelo de PM2.5 e PM10); estações da rede AQICN/WAQI",
         },
     }
     (saida / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))

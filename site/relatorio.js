@@ -12,6 +12,13 @@ function estadoDaUrl(D) {
   return e;
 }
 
+function arKpi(D, e) {
+  const ar = arDoFiltro(D, e);
+  if (!ar.length) return [];
+  return e.mun >= 0 ? [[CLASSES_AR[ar[0].classe].nome, 'qualidade do ar hoje']]
+    : [[fmt(ar.filter(r => r.classe >= 2).length), 'cidades com ar ruim ou pior hoje']];
+}
+
 function tabela(sel, cab, linhas) {
   $(sel).innerHTML = `<tr>${cab.map(c => `<th class="${c.startsWith('#') ? 'n' : ''}">${c.replace(/^#/, '')}</th>`).join('')}</tr>` +
     (linhas.length ? linhas.join('') : `<tr><td colspan="${cab.length}" class="vazio">Nenhum registro no período.</td></tr>`);
@@ -77,7 +84,7 @@ carregarDados().then(async D => {
   const periodo = `${dataBR(D, e.de)} a ${dataBR(D, e.ate)}`;
 
   document.title = `Relatório de fogo · ${e.mun >= 0 ? D.F.municipios[e.mun] : 'Amazonas'} · ${periodo} · NEX`;
-  $('#titulo').textContent = `Focos de calor e eventos de fogo — ${nomeLocal}`;
+  $('#titulo').textContent = `Fogo e qualidade do ar — ${nomeLocal}`;
   $('#subtitulo').innerHTML = `Período: <b>${periodo}</b> · Contagem: <b>${esc(METODOS[e.metodo].nome)}</b>` +
     (e.cats.size < 4 ? ` · Categorias: ${[...e.cats].map(c => D.F.categorias[c]).join(', ')}` : '');
   $('#gerado').innerHTML = `Gerado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}<br>` +
@@ -95,7 +102,7 @@ carregarDados().then(async D => {
     [fmt(a.porCar.size), 'imóveis CAR atingidos'],
     [evs.filter(p => p.status_evento === 'Ativo').length, 'eventos ativos agora'],
     [evs.filter(p => p.classe === 'Crítica').length, 'eventos de prioridade crítica'],
-  ].map(([v, r]) => `<div class="kpi"><b>${v}</b><span>${r}</span></div>`).join('');
+  ].concat(arKpi(D, e)).map(([v, r]) => `<div class="kpi"><b>${v}</b><span>${r}</span></div>`).join('');
 
   $('#legenda').innerHTML = `<span class="ponto" style="background:#d7301f"></span> Focos de calor no período · ` +
     Object.entries(CORES_CLASSE).map(([c, cor]) => `<span class="ponto quad" style="background:${cor}"></span> Evento ${c.toLowerCase()}`).join(' · ') +
@@ -103,6 +110,21 @@ carregarDados().then(async D => {
     '<span class="ponto" style="background:#fff;border:1px solid #000"></span> Sede municipal';
 
   graficos(D, e, a);
+
+  const ar = arDoFiltro(D, e);
+  if (ar.length) {
+    const hora = D.ar.hora ? `${D.ar.hora.slice(8, 10)}/${D.ar.hora.slice(5, 7)} às ${D.ar.hora.slice(11, 16)}` : '';
+    const est = D.ar.estacoes.length
+      ? ` Estações de medição da rede AQICN no estado: ${D.ar.estacoes.map(s => `${esc(s.nome)} (índice ${s.aqi}, ${faixaAqi(s.aqi).toLowerCase()})`).join('; ')}.`
+      : '';
+    $('#nota-ar').innerHTML = `Situação no momento em que o relatório foi gerado, não no período do filtro. Média das ` +
+      `24 horas até ${hora} (horário de Manaus), na sede de cada município, pelo Índice de Qualidade do Ar do MMA. ` +
+      `PM2,5 é a fumaça fina, em µg/m³. Valores estimados pelo modelo Copernicus/CAMS.` +
+      (e.mun < 0 ? ` Mostrando as ${Math.min(15, ar.length)} cidades com pior ar de ${ar.length}.` : '') + est;
+    tabela('#t-ar', CAB_AR, linhasAr(ar.slice(0, 15)));
+  } else {
+    $('#sec-ar').remove();
+  }
 
   if (e.mun < 0) {
     const linhas = rankingMunicipios(D, e, a, t).filter(r => r.focos || r.ativos).sort((x, y) => y.focos - x.focos).slice(0, 20);

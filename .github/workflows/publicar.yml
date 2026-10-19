@@ -41,6 +41,8 @@ jobs:
           restore-keys: fontes-
 
       - run: python pipeline/build.py --saida site/data
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}   # opcional: estações AQICN (token grátis em aqicn.org/data-platform/token)
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

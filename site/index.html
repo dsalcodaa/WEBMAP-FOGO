@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fogo no Amazonas · NEX</title>
-  <meta name="description" content="Painel público de focos de calor (INPE) e eventos de fogo (SIPAM) no Amazonas, cruzados com imóveis do CAR, unidades de conservação e terras indígenas. Um produto NEX – Hub de Análises Estratégicas.">
+  <meta name="description" content="Painel público de focos de calor (INPE), eventos de fogo (SIPAM) e qualidade do ar no Amazonas, cruzados com imóveis do CAR, unidades de conservação e terras indígenas. Um produto NEX – Hub de Análises Estratégicas.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
@@ -51,7 +51,7 @@
       <select id="f-mun"><option value="-1">Todo o Amazonas</option></select>
     </label>
     <label class="campo">
-      <span>Como contar <button class="ajuda" data-ajuda="metodo" title="O que é isso?">?</button></span>
+      <span>Como contar os focos <button class="ajuda" data-ajuda="metodo" title="O que é isso?">?</button></span>
       <select id="f-metodo"></select>
     </label>
     <div class="campo">
@@ -90,6 +90,11 @@
             <a href="https://consultapublica.car.gov.br/publico/imoveis/index" target="_blank" rel="noopener">consulta pública do CAR</a>.</p>
           <div class="rolagem"><table class="ranking" id="t-car"></table></div>
         </article>
+        <article class="cartao largo" id="cartao-ar">
+          <h2>Qualidade do ar hoje <button class="ajuda" data-ajuda="ar" title="O que é isso?">?</button></h2>
+          <p class="nota" id="nota-ar"></p>
+          <div class="rolagem"><table class="ranking" id="t-ar"></table></div>
+        </article>
         <article class="cartao">
           <h2>Unidades de conservação</h2>
           <div class="rolagem"><table class="ranking" id="t-uc"></table></div>
@@ -113,11 +118,12 @@
         <div class="camadas">
           <strong>Camadas</strong>
           <label><input type="checkbox" data-camada="focos" checked> Focos de calor</label>
-          <label><input type="checkbox" data-camada="eventos" checked> Eventos SIPAM</label>
+          <label><input type="checkbox" data-camada="eventos" checked> Eventos de fogo (SIPAM)</label>
           <label><input type="checkbox" data-camada="car" checked> Imóveis CAR com fogo</label>
           <label><input type="checkbox" data-camada="uc" checked> Unidades de conservação</label>
           <label><input type="checkbox" data-camada="ti" checked> Terras indígenas</label>
           <label><input type="checkbox" data-camada="sedes" checked> Sedes municipais</label>
+          <label><input type="checkbox" data-camada="ar"> Qualidade do ar</label>
           <label><input type="checkbox" data-camada="mun"> Focos por município</label>
           <div class="base">
             <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
@@ -131,10 +137,11 @@
 
     <!-- MOBILIZAÇÃO -->
     <section class="aba" id="aba-mobilizacao" hidden>
-      <p class="resumo">Sugestão de onde mobilizar equipes, com base nos eventos de fogo ativos ou em observação do SIPAM.
-        Cada evento recebe um <b>índice de prioridade de 0 a 100</b>, que combina o índice oficial de acionamento do SIPAM,
-        os focos das últimas 48 horas, o tamanho, a duração e se atinge área protegida. Tempos e custos são
-        <b>estimativas de deslocamento</b> a partir da sede municipal mais próxima ou de Manaus.</p>
+      <p class="resumo">Onde mandar equipes primeiro. A lista usa os <b>eventos de fogo</b> do SIPAM, que são incêndios
+        em andamento ou apagados há pouco. Cada um recebe uma <b>nota de prioridade de 0 a 100</b>: quanto maior, mais
+        urgente. A nota leva em conta a avaliação do próprio SIPAM, se o fogo continua aparecendo nas últimas 48 horas,
+        o tamanho, há quantos dias ele dura e se atinge terra indígena ou área protegida. Tempos e custos são
+        <b>estimativas</b> de viagem a partir da cidade mais próxima ou de Manaus.</p>
       <div class="kpis" id="kpis-mob"></div>
       <div class="grade">
         <article class="cartao largo">

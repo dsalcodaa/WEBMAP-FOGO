@@ -32,21 +32,30 @@ Site estático (GitHub Pages) atualizado todo dia às 07:00 (Brasília) por um G
 | Municípios | IBGE | API de malhas |
 | Sedes municipais | Compilação aberta `kelvins/municipios-brasileiros` | CSV |
 | Rodovias | OpenStreetMap | Overpass API |
+| Qualidade do ar (modelo) | Copernicus CAMS | API `air-quality-api.open-meteo.com` |
+| Qualidade do ar (estações, opcional) | AQICN / WAQI | API `api.waqi.info`, token no secret `WAQI_TOKEN` |
 
 ## Metodologia (resumo)
 
 A explicação completa está na aba **Metodologia** do site.
 
-- **Focos únicos.** O mesmo fogo é detectado várias vezes ao dia (o GOES-19 a cada 10 min, o VIIRS em três
-  satélites). Somar as detecções superestima o fogo cerca de 3,6 vezes. O padrão é contar um foco por célula de
-  ~1 km por dia, juntando todos os satélites. Também dá para contar pelo satélite de referência do INPE (AQUA, que
-  é comparável com as séries oficiais) ou pelas detecções brutas. Duplicatas entre os arquivos mensal e diário do
-  INPE são removidas.
+- **Contagem de focos.** O padrão é o **número oficial do INPE**: só o satélite de referência (AQUA_M-T, desde
+  2007; antes, NOAA-12), o mesmo usado pelo INPE, Ibama, governos e imprensa, comparável entre anos. Opções:
+  *lugares com fogo por dia* (todos os satélites, uma célula de ~1 km por dia; método deste painel, não comparável
+  com o oficial) e *todas as detecções* (uso técnico; conta o mesmo fogo ~3,6 vezes). Duplicatas entre os arquivos
+  mensal e diário do INPE são removidas.
+- **Eventos SIPAM.** Vêm prontos da API do Painel do Fogo (Censipam), que agrupa focos próximos no espaço e no tempo.
+  O painel não cria eventos; só acrescenta CAR, áreas protegidas, focos recentes, distâncias e a nota de prioridade.
+- **Qualidade do ar.** Média de 24 h de PM2,5 e PM10 na sede de cada município, do modelo Copernicus/CAMS via
+  Open-Meteo (grátis, sem chave), classificada pelo Índice de Qualidade do Ar do MMA (CONAMA 491/2018). Estações
+  medidas da rede AQICN aparecem se o secret `WAQI_TOKEN` estiver configurado (token grátis em
+  https://aqicn.org/data-platform/token/). IQAir e Google Air Quality não foram usados: o Google exige conta com
+  cobrança, e o plano grátis do IQAir é limitado a 5 chamadas por minuto e a poucas cidades do AM.
 - **Situação fundiária.** Ordem de precedência: TI > UC > Imóvel CAR > Sem cadastro. Polígonos do CAR sobrepostos:
   o foco vai para o menor. Imóveis com CAR cancelado são excluídos. O CAR é autodeclaratório e não comprova
   propriedade nem autoria do fogo, e o CAR público não traz nome/CPF do declarante (LGPD).
-- **Eventos SIPAM.** O polígono é a área de influência das detecções, não a área queimada medida. A área do evento
-  em imóveis do CAR usa a união dos imóveis, para não contar sobreposições duas vezes.
+- **Área dos eventos.** O polígono é a área de influência das detecções, não a área queimada medida. A área do
+  evento em imóveis do CAR usa a união dos imóveis, para não contar sobreposições duas vezes.
 - **Prioridade de mobilização (0–100).** Pesos: índice de acionamento do SIPAM 30, focos únicos nas últimas 48 h
   25, área 15, persistência 10, área sensível (TI/UC/quilombo/assentamento) 10, status ativo 10. Classes:
   Crítica ≥ 70, Alta ≥ 50, Moderada ≥ 30.

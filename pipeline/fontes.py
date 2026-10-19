@@ -1,5 +1,6 @@
-"""Coleta de dados das fontes públicas (INPE, SIPAM, SICAR, MMA/CNUC, FUNAI, IBGE)."""
+"""Coleta de dados das fontes públicas (INPE, SIPAM, SICAR, MMA/CNUC, FUNAI, IBGE, CAMS, AQICN)."""
 import io
+import os
 import re
 import ssl
 import time
@@ -12,7 +13,7 @@ import geopandas as gpd
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
-from shapely.geometry import LineString, shape
+from shapely.geometry import LineString, Point, shape
 
 UF = "AM"
 UF_IBGE = 13
@@ -180,6 +181,40 @@ def sedes_municipais() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
         {"cod_ibge": df.codigo_ibge, "nome": df.nome, "capital": df.capital == 1},
         geometry=gpd.points_from_xy(df.longitude, df.latitude), crs=CRS).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------- qualidade do ar
+
+OPEN_METEO_AR = "https://air-quality-api.open-meteo.com/v1/air-quality"
+WAQI_BOUNDS = "https://api.waqi.info/v2/map/bounds"
+
+
+def ar_modelo(pontos: gpd.GeoDataFrame) -> list[dict]:
+    """PM2.5 e PM10 horários (últimas 24 h) do modelo CAMS via Open-Meteo, para cada ponto. Grátis, sem chave."""
+    dados = get(OPEN_METEO_AR, params={
+        "latitude": ",".join(f"{y:.3f}" for y in pontos.geometry.y),
+        "longitude": ",".join(f"{x:.3f}" for x in pontos.geometry.x),
+        "current": "pm2_5,pm10", "hourly": "pm2_5,pm10",
+        "past_days": 1, "forecast_days": 1, "timezone": "America/Manaus",
+    }).json()
+    return dados if isinstance(dados, list) else [dados]
+
+
+def ar_estacoes(uf: gpd.GeoDataFrame) -> list[dict]:
+    """Estações de medição na UF (rede AQICN/WAQI). Precisa do token grátis em WAQI_TOKEN; sem ele, lista vazia."""
+    token = os.environ.get("WAQI_TOKEN")
+    if not token:
+        print("  WAQI_TOKEN não definido: estações AQICN ignoradas")
+        return []
+    x0, y0, x1, y1 = uf.total_bounds
+    r = get(WAQI_BOUNDS, params={"latlng": f"{y0},{x0},{y1},{x1}", "networks": "all", "token": token}).json()
+    if r.get("status") != "ok":
+        print("  AQICN:", r.get("data"))
+        return []
+    area = uf.union_all()
+    return [{"nome": s["station"]["name"], "lat": s["lat"], "lon": s["lon"], "aqi": int(s["aqi"]),
+             "hora": s["station"].get("time")}
+            for s in r["data"] if str(s["aqi"]).isdigit() and area.contains(Point(s["lon"], s["lat"]))]
 
 
 # ---------------------------------------------------------------- OpenStreetMap
