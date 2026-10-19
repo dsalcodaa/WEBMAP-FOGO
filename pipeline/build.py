@@ -154,12 +154,18 @@ def main():
     car = car[car.status_imovel != "CA"].reset_index(drop=True)
     print("5/9 rodovias (OpenStreetMap)")
     vias = fontes.vias_osm(cache / f"vias_{fontes.UF.lower()}.parquet")
-    try:  # complemento: sem o DNIT o site sai, só sem essas camadas
+    # o servidor do DNIT não responde fora do Brasil (GitHub Actions); usa a cópia versionada no repositório.
+    # Para atualizar a cópia, rode o pipeline de uma máquina no Brasil e faça commit de pipeline/dados/.
+    copia_dnit = Path(__file__).parent / "dados" / f"dnit_{fontes.UF.lower()}.geojson"
+    try:
         dnit = fontes.dnit(uf)
+        copia_dnit.parent.mkdir(exist_ok=True)
+        dnit.to_file(copia_dnit, driver="GeoJSON")
         print(f"  DNIT: {dnit.tipo.value_counts().to_dict()}")
     except Exception as e:  # noqa: BLE001
-        print("  DNIT ignorado:", e)
-        dnit = gpd.GeoDataFrame({"tipo": [], "nome": [], "detalhe": []}, geometry=[], crs=fontes.CRS)
+        print("  DNIT indisponível, usando a cópia do repositório:", e)
+        dnit = gpd.read_file(copia_dnit) if copia_dnit.exists() else \
+            gpd.GeoDataFrame({"tipo": [], "nome": [], "detalhe": []}, geometry=[], crs=fontes.CRS)
     print("6/9 eventos de fogo e prioridades (SIPAM)")
     eventos = fontes.eventos_sipam().reset_index(drop=True)
     eventos["indice_sipam"] = eventos.id_evento.map(fontes.prioridades_sipam(eventos.id_evento.tolist()))

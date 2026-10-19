@@ -230,15 +230,15 @@ def _dnit_params(camada, filtro, **extra):
 
 
 def _dnit(camada: str, filtro: str) -> gpd.GeoDataFrame:
-    feats = get(DNIT_WFS, params=_dnit_params(camada, filtro)).json()["features"]
+    feats = get(DNIT_WFS, params=_dnit_params(camada, filtro), tentativas=2, timeout=60).json()["features"]
     return gpd.GeoDataFrame.from_features(feats, crs="EPSG:4326").to_crs(CRS)
 
 
 def dnit(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Rodovias federais (SNV, versão mais recente), pistas de pouso e portos do DNIT, recortados para a UF."""
     # o SNV guarda todas as versões desde 2013; busca só o campo da versão para achar a mais recente
-    feats = get(DNIT_WFS, params=_dnit_params("vw_snv_rod", f"Unidade_Federacao='{UF}'",
-                                             propertyName="Versao_SNV")).json()["features"]
+    feats = get(DNIT_WFS, params=_dnit_params("vw_snv_rod", f"Unidade_Federacao='{UF}'", propertyName="Versao_SNV"),
+                tentativas=2, timeout=60).json()["features"]
     versao = max(f["properties"]["Versao_SNV"] for f in feats)
     rod = _dnit("vw_snv_rod", f"Unidade_Federacao='{UF}' AND Versao_SNV='{versao}'")
     rod = rod[rod.Superficie_Federal.isin(SUPERFICIE_SNV)]
