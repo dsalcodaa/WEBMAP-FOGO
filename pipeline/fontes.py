@@ -193,19 +193,34 @@ def imoveis_car(cache: Path, max_idade_dias=7, pagina=5000) -> gpd.GeoDataFrame:
 
 # ---------------------------------------------------------------- IBGE
 
+def _ibge(arquivo: str, vivo) -> gpd.GeoDataFrame:
+    """IBGE ao vivo; se o servidor não responder (ocorre nos runners do GitHub), usa a cópia versionada."""
+    try:
+        return vivo()
+    except requests.RequestException as e:
+        print(f"  IBGE indisponível ({type(e).__name__}); usando pipeline/dados/{arquivo}")
+        return gpd.read_file(Path(__file__).parent / "dados" / arquivo).set_crs(CRS, allow_override=True)
+
+
 def limite_uf() -> gpd.GeoDataFrame:
-    r = get(IBGE_MALHA.format(uf=UF_IBGE), params={"formato": "application/vnd.geo+json", "qualidade": "intermediaria"})
-    return gpd.GeoDataFrame.from_features(r.json()["features"], crs=CRS)
+    def vivo():
+        r = get(IBGE_MALHA.format(uf=UF_IBGE), params={"formato": "application/vnd.geo+json", "qualidade": "intermediaria"},
+                tentativas=2, timeout=30)
+        return gpd.GeoDataFrame.from_features(r.json()["features"], crs=CRS)
+    return _ibge("ibge_uf.geojson", vivo)
 
 
 def municipios() -> gpd.GeoDataFrame:
-    r = get(IBGE_MALHA.format(uf=UF_IBGE), params={
-        "formato": "application/vnd.geo+json", "qualidade": "intermediaria", "intrarregiao": "municipio"})
-    gdf = gpd.GeoDataFrame.from_features(r.json()["features"], crs=CRS)
-    nomes = {str(m["id"]): m["nome"] for m in get(IBGE_MUNICIPIOS.format(uf=UF_IBGE)).json()}
-    gdf["cod_ibge"] = gdf["codarea"].astype(str)
-    gdf["nome"] = gdf["cod_ibge"].map(nomes)
-    return gdf[["cod_ibge", "nome", "geometry"]]
+    def vivo():
+        r = get(IBGE_MALHA.format(uf=UF_IBGE), params={
+            "formato": "application/vnd.geo+json", "qualidade": "intermediaria", "intrarregiao": "municipio"},
+            tentativas=2, timeout=30)
+        gdf = gpd.GeoDataFrame.from_features(r.json()["features"], crs=CRS)
+        nomes = {str(m["id"]): m["nome"] for m in get(IBGE_MUNICIPIOS.format(uf=UF_IBGE), timeout=30).json()}
+        gdf["cod_ibge"] = gdf["codarea"].astype(str)
+        gdf["nome"] = gdf["cod_ibge"].map(nomes)
+        return gdf[["cod_ibge", "nome", "geometry"]]
+    return _ibge("ibge_municipios.geojson", vivo)
 
 
 def sedes_municipais() -> gpd.GeoDataFrame:
