@@ -384,10 +384,11 @@ function iniciarMapa() {
       id: 'car-fill', type: 'fill', source: 'car', minzoom: 7,
       paint: {
         'fill-color': ['interpolate', ['linear'], n, 0, '#6b5d1f', 5, '#e5c547', 30, '#ff8a2c'],
-        'fill-opacity': ['case', ['>', n, 0], 0.35, 0.12],
+        'fill-opacity': ['case', ['>', n, 0], 0.35, 0],  // sem foco no período do filtro: não desenha
       },
     });
-    map.addLayer({ id: 'car-line', type: 'line', source: 'car', minzoom: 7, paint: { 'line-color': '#e5c547', 'line-width': 0.7 } });
+    map.addLayer({ id: 'car-line', type: 'line', source: 'car', minzoom: 7,
+      paint: { 'line-color': '#e5c547', 'line-width': 0.7, 'line-opacity': ['case', ['>', n, 0], 1, 0] } });
     map.addLayer({ id: 'eventos-fill', type: 'fill', source: 'eventos', paint: { 'fill-color': corClasse, 'fill-opacity': 0.35 } });
     map.addLayer({ id: 'eventos-line', type: 'line', source: 'eventos', paint: { 'line-color': corClasse, 'line-width': 1.4 } });
     map.addLayer({
@@ -526,7 +527,9 @@ function popups() {
   const ordem = ['dnit-pista', 'dnit-porto', 'focos-pt', 'sedes', 'dnit-rod', 'eventos-fill', 'car-fill', 'ti-fill', 'uc-fill', 'mun-fill'];
   map.on('click', e => {
     const visiveis = ordem.filter(id => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== 'none');
-    const [f] = map.queryRenderedFeatures(e.point, { layers: visiveis });
+    // imóvel sem foco no filtro está invisível: não deve responder ao clique
+    const f = map.queryRenderedFeatures(e.point, { layers: visiveis })
+      .find(x => x.layer.id !== 'car-fill' || x.state?.n > 0);
     if (!f) return;
     const p = f.properties, F = D.F;
     switch (f.layer.id) {
