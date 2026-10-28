@@ -49,8 +49,8 @@ session.headers["User-Agent"] = "webmap-fogo/1.0 (+https://github.com)"
 session.mount("https://geoserver.car.gov.br", _LegacyTLS())
 
 
-def get(url, tentativas=4, **kwargs):
-    kwargs.setdefault("timeout", 180)
+def get(url, tentativas=3, **kwargs):
+    kwargs.setdefault("timeout", 60)
     for i in range(tentativas):
         try:
             r = session.get(url, **kwargs)
@@ -61,6 +61,23 @@ def get(url, tentativas=4, **kwargs):
                 raise
             print(f"  retry {i + 1} {url}: {e}")
             time.sleep(5 * (i + 1))
+
+
+FALHAS_REDE = (requests.RequestException, ValueError, KeyError, IndexError, zipfile.BadZipFile)
+
+
+def com_cache_antigo(arquivo: Path, vivo) -> gpd.GeoDataFrame:
+    """Dado ao vivo; se a fonte falhar (comum nos runners do GitHub), usa o último que deu certo, de qualquer idade."""
+    try:
+        gdf = vivo()
+    except FALHAS_REDE as e:
+        if not arquivo.exists():
+            raise
+        print(f"  FONTE FORA DO AR ({type(e).__name__}: {str(e)[:120]}); usando cache antigo {arquivo.name}")
+        return gpd.read_parquet(arquivo)
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_parquet(arquivo)
+    return gdf
 
 
 # ---------------------------------------------------------------- INPE
@@ -165,6 +182,10 @@ def imoveis_car(cache: Path, max_idade_dias=7, pagina=5000) -> gpd.GeoDataFrame:
         print("  CAR do cache", cache)
         return gpd.read_parquet(cache)
 
+    return com_cache_antigo(cache, lambda: _baixar_car(pagina))
+
+
+def _baixar_car(pagina: int) -> gpd.GeoDataFrame:
     camada = f"sicar:sicar_imoveis_{UF.lower()}"
     partes, inicio = [], 0
     while True:
@@ -173,7 +194,7 @@ def imoveis_car(cache: Path, max_idade_dias=7, pagina=5000) -> gpd.GeoDataFrame:
             "service": "WFS", "version": "2.0.0", "request": "GetFeature",
             "typeNames": camada, "outputFormat": "application/json",
             "count": pagina, "startIndex": inicio, "sortBy": "cod_imovel",
-        }, timeout=600)
+        }, timeout=600, tentativas=2)
         fc = r.json()
         feats = fc.get("features", [])
         if not feats:
@@ -186,8 +207,6 @@ def imoveis_car(cache: Path, max_idade_dias=7, pagina=5000) -> gpd.GeoDataFrame:
     gdf = pd.concat(partes, ignore_index=True)
     gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs=CRS).drop_duplicates("cod_imovel")
     gdf["geometry"] = gdf.geometry.make_valid()
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_parquet(cache)
     return gdf
 
 
@@ -353,12 +372,16 @@ def vias_osm(cache: Path, max_idade_dias=30) -> gpd.GeoDataFrame:
 
 def unidades_conservacao(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Shapefile mais recente do CNUC, recortado para a UF."""
+    return com_cache_antigo(Path("cache/uc_ultimo.parquet"), lambda: _baixar_uc(uf))
+
+
+def _baixar_uc(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     html = get(CNUC_DATASET).text
     zips = sorted(set(re.findall(r'href="(https?://[^"]+/shp_cnuc_(\d{4})_(\d{2})[^"]*\.zip)"', html)),
                   key=lambda t: (t[1], t[2]))
     url = zips[-1][0]
     print("  CNUC", url.rsplit("/", 1)[-1])
-    z = zipfile.ZipFile(io.BytesIO(get(url, timeout=600).content))
+    z = zipfile.ZipFile(io.BytesIO(get(url, timeout=600, tentativas=2).content))
     shp = next(n for n in z.namelist() if n.lower().endswith(".shp"))
     tmp = Path("cache/cnuc")
     tmp.mkdir(parents=True, exist_ok=True)
@@ -389,12 +412,16 @@ def _bundle_funai() -> str:
 
 
 def terras_indigenas(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return com_cache_antigo(Path("cache/ti_ultimo.parquet"), lambda: _baixar_ti(uf))
+
+
+def _baixar_ti(uf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     minx, miny, maxx, maxy = uf.total_bounds
     r = get(FUNAI_WFS, params={
         "service": "WFS", "version": "1.0.0", "request": "GetFeature",
         "typeName": "Funai:tis_poligonais", "outputFormat": "application/json",
         "bbox": f"{minx},{miny},{maxx},{maxy},EPSG:4674", "srsName": "EPSG:4674",
-    }, timeout=600, verify=_bundle_funai())
+    }, timeout=600, tentativas=2, verify=_bundle_funai())
     gdf = gpd.GeoDataFrame.from_features(r.json()["features"], crs=CRS)
     gdf = gdf[gdf.intersects(uf.union_all())].copy()
     gdf["geometry"] = gdf.geometry.make_valid()
