@@ -5,9 +5,9 @@ const CORES_CAT = ['#f2994a', '#3fbf7f', '#e5c547', '#8c96a3'];
 const CORES_CLASSE = { 'Crítica': '#ff3b3b', 'Alta': '#ff8a2c', 'Moderada': '#e5c547', 'Baixa': '#8c96a3' };
 // superfície das rodovias federais (texto igual ao gerado em pipeline/fontes.py)
 const CORES_RODOVIA = {
-  'Pavimentada (duplicada)': '#ffffff', 'Pavimentada': '#d9d9d9', 'Em obras de duplicação': '#bdbdbd',
-  'Em obras de pavimentação': '#e5c547', 'Implantada (leito natural)': '#c08a4a', 'Em obras de implantação': '#a0703a',
-  'Travessia (balsa)': '#4aa3ff',
+  'Pavimentada (duplicada)': '#0b1f3a', 'Pavimentada': '#334155', 'Em obras de duplicação': '#64748b',
+  'Em obras de pavimentação': '#b68b00', 'Implantada (leito natural)': '#92400e', 'Em obras de implantação': '#b45309',
+  'Travessia (balsa)': '#0284c7',
 };
 const STATUS_CAR ={ AT: 'Ativo', PE: 'Pendente', SU: 'Suspenso', CA: 'Cancelado' };
 const TIPO_CAR = { IRU: 'Imóvel rural', AST: 'Assentamento', PCT: 'Povos e comunidades tradicionais' };

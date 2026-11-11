@@ -161,9 +161,9 @@ function kpis(a, t) {
   return itens.map(([v, r, s]) => `<div class="kpi"><b>${v}</b><span>${r}</span><small>${s}</small></div>`).join('');
 }
 
-Chart.defaults.color = '#9aa3ae';
-Chart.defaults.borderColor = '#2b323c';
-Chart.defaults.font.family = 'system-ui, sans-serif';
+Chart.defaults.color = '#444444';
+Chart.defaults.borderColor = '#dfdfdf';
+Chart.defaults.font.family = 'Rawline, "Segoe UI", system-ui, sans-serif';
 
 function graficosAtualizar(a) {
   const rotulos = Array.from({ length: a.nDias }, (_, k) => dataBR(D, estado.de + k).slice(0, 5));
@@ -185,7 +185,7 @@ function graficosAtualizar(a) {
       options: { maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } },
     });
     graficos.mun = new Chart($('#g-mun'), {
-      type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#ff6b2c' }] },
+      type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#c2410c' }] },
       options: {
         indexAxis: 'y', maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false } },
@@ -204,7 +204,7 @@ function graficosAtualizar(a) {
     });
   }
   if (graficos.ano) {
-    graficos.ano.data.datasets[0].backgroundColor = anos.map(a => a.ano === D.F.ano ? '#ff6b2c' : '#5a6472');
+    graficos.ano.data.datasets[0].backgroundColor = anos.map(a => a.ano === D.F.ano ? '#c2410c' : '#9aa7b8');
     graficos.ano.update();
   }
   graficos.dia.data.labels = rotulos;
@@ -264,7 +264,7 @@ function tabelaMobilizacao(a, t) {
   const evs = eventosDoFiltro(D, estado);
   const conta = c => evs.filter(p => p.classe === c).length;
   $('#kpis-mob').innerHTML = ['Crítica', 'Alta', 'Moderada', 'Baixa'].map(c =>
-    `<div class="kpi" style="border-left:4px solid ${CORES_CLASSE[c]}"><b>${conta(c)}</b><span>prioridade ${c.toLowerCase()}</span></div>`).join('') +
+    `<div class="kpi"><b>${conta(c)}</b><span><span class="bolinha quadrada" style="background:${CORES_CLASSE[c]}"></span> prioridade ${c.toLowerCase()}</span></div>`).join('') +
     `<div class="kpi"><b>${evs.filter(p => p.status_evento === 'Ativo').length}</b><span>eventos ativos</span></div>`;
 
   $('#t-mob').innerHTML = '<tr><th>#</th><th>Prioridade</th><th>Local</th><th class="n">Área</th><th class="n">Focos 48 h</th>' +
@@ -354,11 +354,14 @@ function zoomMunicipio(m) {
 
 function iniciarMapa() {
   map = new maplibregl.Map({
-    container: 'mapa', style: estiloBase('escuro'), center: [-63.5, -4.5], zoom: 5,
+    container: 'mapa', style: estiloBase('claro'), center: [-63.5, -4.5], zoom: 5,
     attributionControl: { compact: true },
   });
-  map.addControl(new maplibregl.NavigationControl(), 'top-right');
+  // controles embaixo à direita: o painel de camadas ocupa o canto superior direito
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
+  // o painel lateral flutua sobre o mapa (340 px + margens): centraliza na área livre
+  if (innerWidth > 900) map.setPadding({ left: 364, top: 0, right: 0, bottom: 0 });
 
   map.on('load', () => {
     map.addSource('mun', { type: 'geojson', data: D.mun, promoteId: 'i' });
@@ -373,9 +376,9 @@ function iniciarMapa() {
     const n = ['coalesce', ['feature-state', 'n'], 0];
     map.addLayer({
       id: 'mun-fill', type: 'fill', source: 'mun', layout: { visibility: 'none' },
-      paint: { 'fill-color': ['interpolate', ['linear'], n, 0, '#1d232b', 20, '#5a2a1a', 200, '#b3401a', 1000, '#ff6b2c'], 'fill-opacity': 0.75 },
+      paint: { 'fill-color': ['interpolate', ['linear'], n, 0, '#eef1f5', 20, '#fbd9c2', 200, '#f08a4b', 1000, '#c2410c'], 'fill-opacity': 0.75 },
     });
-    map.addLayer({ id: 'mun-line', type: 'line', source: 'mun', paint: { 'line-color': '#4a5563', 'line-width': 0.6 } });
+    map.addLayer({ id: 'mun-line', type: 'line', source: 'mun', paint: { 'line-color': '#8a94a3', 'line-width': 0.6 } });
     map.addLayer({ id: 'uc-fill', type: 'fill', source: 'uc', paint: { 'fill-color': '#3fbf7f', 'fill-opacity': 0.08 } });
     map.addLayer({ id: 'uc-line', type: 'line', source: 'uc', paint: { 'line-color': '#3fbf7f', 'line-width': 1.2 } });
     map.addLayer({ id: 'ti-fill', type: 'fill', source: 'ti', paint: { 'fill-color': '#f2994a', 'fill-opacity': 0.08 } });
@@ -383,12 +386,12 @@ function iniciarMapa() {
     map.addLayer({
       id: 'car-fill', type: 'fill', source: 'car', minzoom: 7,
       paint: {
-        'fill-color': ['interpolate', ['linear'], n, 0, '#6b5d1f', 5, '#e5c547', 30, '#ff8a2c'],
+        'fill-color': ['interpolate', ['linear'], n, 0, '#b68b00', 5, '#d9a400', 30, '#e8590c'],
         'fill-opacity': ['case', ['>', n, 0], 0.35, 0],  // sem foco no período do filtro: não desenha
       },
     });
     map.addLayer({ id: 'car-line', type: 'line', source: 'car', minzoom: 7,
-      paint: { 'line-color': '#e5c547', 'line-width': 0.7, 'line-opacity': ['case', ['>', n, 0], 1, 0] } });
+      paint: { 'line-color': '#9a7400', 'line-width': 0.7, 'line-opacity': ['case', ['>', n, 0], 1, 0] } });
     map.addLayer({ id: 'eventos-fill', type: 'fill', source: 'eventos', paint: { 'fill-color': corClasse, 'fill-opacity': 0.35 } });
     map.addLayer({ id: 'eventos-line', type: 'line', source: 'eventos', paint: { 'line-color': corClasse, 'line-width': 1.4 } });
     map.addLayer({
@@ -399,7 +402,7 @@ function iniciarMapa() {
         'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 3, 1, 5, 0.6, 9, 1.2],
         'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.9, 9, 0],
         'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
-          0, 'rgba(0,0,0,0)', 0.2, '#5a1a0a', 0.45, '#b3261e', 0.7, '#ff6b2c', 1, '#ffe08a'],
+          0, 'rgba(255,255,255,0)', 0.2, '#fcd34d', 0.45, '#f97316', 0.7, '#dc2626', 1, '#7f1d1d'],
       },
     });
     map.addLayer({
@@ -423,7 +426,7 @@ function iniciarMapa() {
       id: 'dnit-rod', type: 'line', source: 'dnit', filter: ['==', ['get', 'tipo'], 'rodovia'], layout: oculto,
       paint: {
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.5, 10, 4],
-        'line-color': ['match', ['get', 'detalhe'], ...Object.entries(CORES_RODOVIA).flat(), '#e5c547'],
+        'line-color': ['match', ['get', 'detalhe'], ...Object.entries(CORES_RODOVIA).flat(), '#b68b00'],
       },
     }, 'eventos-fill');
     map.addLayer({

@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fogo no Amazonas · NEX</title>
   <meta name="description" content="Painel público de focos de calor (INPE), eventos de fogo (SIPAM) e qualidade do ar no Amazonas, cruzados com imóveis do CAR, unidades de conservação e terras indígenas. Um produto NEX – Hub de Análises Estratégicas.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='12' fill='%23071d41'/><text x='50' y='67' font-size='44' font-family='sans-serif' font-weight='700' fill='%23fff' text-anchor='middle'>NEX</text></svg>">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="preload" href="fonts/rawline-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -139,7 +140,7 @@
           <label class="dnit"><input type="checkbox" data-camada="portos"> Portos (DNIT)</label>
           <label><input type="checkbox" data-camada="mun"> Focos por município</label>
           <div class="base">
-            <label><input type="radio" name="base" value="escuro" checked> Mapa</label>
+            <label><input type="radio" name="base" value="claro" checked> Mapa</label>
             <label><input type="radio" name="base" value="satelite"> Satélite</label>
           </div>
         </div>
