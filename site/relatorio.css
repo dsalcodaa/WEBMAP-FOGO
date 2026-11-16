@@ -3,6 +3,10 @@
   --suave: #5b6570;
   --borda: #d6dbe1;
   --destaque: #d4511e;
+  --nex: #0097b2;
+  --nex-escuro: #00687c;
+  --nex-fundo: #004a59;
+  --nex-claro: #e8f6f9;
   --fundo: #eef1f4;
 }
 
@@ -24,10 +28,10 @@ body {
   align-items: center;
   justify-content: center;
   padding: 10px 16px;
-  background: #1a1f26;
+  background: var(--nex-fundo);
 }
 .barra-acoes button {
-  background: var(--destaque);
+  background: var(--nex);
   color: #fff;
   border: 0;
   border-radius: 6px;
@@ -36,6 +40,7 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+.barra-acoes button:hover { background: var(--nex-escuro); }
 .barra-acoes button:disabled { opacity: .6; cursor: wait; }
 .barra-acoes a { color: #fff; }
 
@@ -51,30 +56,24 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  border-bottom: 3px solid var(--destaque);
+  border-bottom: 3px solid var(--nex);
+  align-items: center;
   padding-bottom: 6px;
 }
 .marca { display: flex; align-items: center; gap: 8px; font-size: 10pt; color: var(--suave); }
-.nex {
-  background: #111;
-  color: #fff;
-  font-weight: 800;
-  letter-spacing: .08em;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 13pt;
-}
+.logo-nex { display: block; height: 15mm; width: auto; }
+.marca span { font-size: 12pt; font-weight: 700; color: var(--nex-fundo); }
 .cab-dir { font-size: 8.5pt; color: var(--suave); text-align: right; }
 
-h1 { font-size: 17pt; margin: 12px 0 2px; }
+h1 { font-size: 17pt; margin: 12px 0 2px; color: var(--nex-fundo); }
 .sub { color: var(--suave); margin: 0 0 8px; font-size: 10pt; }
-h2 { font-size: 12pt; margin: 14px 0 6px; color: var(--destaque); border-bottom: 1px solid var(--borda); padding-bottom: 2px; }
+h2 { font-size: 12pt; margin: 14px 0 6px; color: var(--nex-escuro); border-bottom: 1.5px solid var(--nex); padding-bottom: 2px; }
 h3 { font-size: 10.5pt; margin: 8px 0 2px; }
 
 .resumo { margin: 0 0 8px; }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.kpi { border: 1px solid var(--borda); border-radius: 6px; padding: 5px 8px; }
-.kpi b { display: block; font-size: 14pt; font-variant-numeric: tabular-nums; }
+.kpi { border: 1px solid var(--borda); border-top: 3px solid var(--nex); border-radius: 6px; padding: 5px 8px; background: var(--nex-claro); }
+.kpi b { color: var(--nex-fundo); display: block; font-size: 14pt; font-variant-numeric: tabular-nums; }
 .kpi span { font-size: 8pt; color: var(--suave); }
 
 #mapa { height: 120mm; border: 1px solid var(--borda); }
@@ -86,7 +85,7 @@ h3 { font-size: 10.5pt; margin: 8px 0 2px; }
 .grafico { position: relative; height: 62mm; }
 
 table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
-th { text-align: left; color: var(--suave); font-weight: 600; border-bottom: 1.5px solid var(--texto); padding: 3px 4px; }
+th { text-align: left; color: #fff; background: var(--nex-escuro); font-weight: 600; border-bottom: 1.5px solid var(--nex-fundo); padding: 3px 4px; }
 td { padding: 3px 4px; border-bottom: 1px solid var(--borda); vertical-align: top; }
 .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cod { font-family: ui-monospace, Consolas, monospace; font-size: 7.5pt; word-break: break-all; }
@@ -101,7 +100,7 @@ td { padding: 3px 4px; border-bottom: 1px solid var(--borda); vertical-align: to
 .rod {
   margin-top: 14px;
   padding-top: 6px;
-  border-top: 1px solid var(--borda);
+  border-top: 2px solid var(--nex);
   font-size: 8pt;
   color: var(--suave);
   text-align: center;
