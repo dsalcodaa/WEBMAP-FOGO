@@ -167,8 +167,14 @@ def main():
         dnit = gpd.read_file(copia_dnit) if copia_dnit.exists() else \
             gpd.GeoDataFrame({"tipo": [], "nome": [], "detalhe": []}, geometry=[], crs=fontes.CRS)
     print("6/9 eventos de fogo e prioridades (SIPAM)")
-    eventos = fontes.eventos_sipam().reset_index(drop=True)
-    eventos["indice_sipam"] = eventos.id_evento.map(fontes.prioridades_sipam(eventos.id_evento.tolist()))
+    # o SIPAM às vezes cai (DNS, certificado); sem isso o pipeline inteiro falhava
+    eventos = fontes.com_cache_antigo(cache / "eventos_sipam.parquet", fontes.eventos_sipam).reset_index(drop=True)
+    try:
+        prioridades = fontes.prioridades_sipam(eventos.id_evento.tolist())
+    except fontes.FALHAS_REDE as e:
+        print("  prioridades SIPAM indisponíveis, índice fica vazio:", e)
+        prioridades = {}
+    eventos["indice_sipam"] = eventos.id_evento.map(prioridades)
     print("7/9 focos de calor (INPE)")
     deteccoes = fontes.focos_inpe(args.ano)
     n_deteccoes_brutas = len(deteccoes)
