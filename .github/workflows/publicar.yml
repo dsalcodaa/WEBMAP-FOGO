@@ -51,6 +51,13 @@ jobs:
           key: historico-${{ steps.ano.outputs.a }}
           restore-keys: historico-
 
+      # reserva dos eventos SIPAM: chave nova a cada run, para a cópia ter no máximo meio dia
+      - uses: actions/cache@v4
+        with:
+          path: cache/sipam
+          key: sipam-${{ github.run_id }}
+          restore-keys: sipam-
+
       - run: python pipeline/build.py --saida site/data
         env:
           WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}   # opcional: estações AQICN (token grátis em aqicn.org/data-platform/token)

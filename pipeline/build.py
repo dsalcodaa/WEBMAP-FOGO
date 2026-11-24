@@ -168,7 +168,7 @@ def main():
             gpd.GeoDataFrame({"tipo": [], "nome": [], "detalhe": []}, geometry=[], crs=fontes.CRS)
     print("6/9 eventos de fogo e prioridades (SIPAM)")
     # o SIPAM às vezes cai (DNS, certificado); sem isso o pipeline inteiro falhava
-    eventos = fontes.com_cache_antigo(cache / "eventos_sipam.parquet", fontes.eventos_sipam).reset_index(drop=True)
+    eventos = fontes.com_cache_antigo(cache / "sipam" / "eventos_sipam.parquet", fontes.eventos_sipam).reset_index(drop=True)
     try:
         prioridades = fontes.prioridades_sipam(eventos.id_evento.tolist())
     except fontes.FALHAS_REDE as e:
